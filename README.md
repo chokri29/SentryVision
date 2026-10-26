@@ -1,6 +1,6 @@
 # Sentry Vision
 
-**Meta Llama–powered Solidity pre-audit verifier for non-technical founders.**
+**Meta Llama–powered Solidity pre-audit verifier for developers and non-technical founders.**
 
 Built during the Meta AI Developer Hackathon.
 
@@ -8,12 +8,12 @@ Built during the Meta AI Developer Hackathon.
 
 ## Problem
 
-Founders and early teams usually get one of two things:
+Developers and non-technical founders usually get one of two things:
 
 - **Dense static-analysis dumps** (e.g. raw Slither) they cannot interpret, or  
 - **Generic LLM answers** with no deterministic grounding they can trust.
 
-Neither helps a non-technical person decide *what is actually dangerous* and *how an exploit would unfold*.
+Neither helps them decide *what is actually dangerous* and *how an exploit would unfold*.
 
 ---
 
@@ -38,7 +38,7 @@ Neither helps a non-technical person decide *what is actually dangerous* and *ho
         ↓
 3. Slither JSON + source → Meta Llama / Muse
    Prompt: triage findings, remove false positives,
-           rank by exploitability, explain for a founder,
+           rank by exploitability, explain for developers and non-technical founders,
            emit attack_flow + optional fix hints
         ↓
 4. Llama returns clean structured JSON
@@ -51,8 +51,8 @@ Neither helps a non-technical person decide *what is actually dangerous* and *ho
 
 | Layer | Role | Engine |
 |------|------|--------|
-| **F1** | Deterministic static signal | Sli ther |
-| **F2** | Triage + founder-facing explanation | Meta Llama / Muse |
+| **F1** | Deterministic static signal | Slither |
+| **F2** | Triage + plain-language explanation | Meta Llama / Muse |
 | **F3** | Visual exploit path | Mermaid.js |
 
 ---
