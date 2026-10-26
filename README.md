@@ -1,5 +1,5 @@
 # Sentry-Vision-
-standalone Meta Llama-powered Solidity Contract Verifier
+A standalone Meta Llama-powered Solidity Contract Verifier
 
  ## Problem: 
 
@@ -32,5 +32,5 @@ static detection
         ↓
 4. Llama returns YOUR final clean JSON
         ↓
-5. Your code turns attack_flow[] into Mermaid (Red diagram)
-   Your code turns fixed code into Mermaid (Green diagram)
+5. The code turns attack_flow[] into Mermaid (Red diagram)
+   The code turns fixed code into Mermaid (Green diagram)
