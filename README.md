@@ -1,4 +1,5 @@
 # Sentry-Vision-
+standalone Meta Llama-powered Solidity Contract Verifier
 
 # Problem: 
 
@@ -18,3 +19,5 @@ static detection
 5. Llama generates a patched version + secure flowchart
 
 * Core Differentiation: Not just "find bugs" — visualize how the hack would actually happen.
+
+* Llama JSON schema -> Slither + Llama + Mermaid pipeline
