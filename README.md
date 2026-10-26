@@ -1,11 +1,11 @@
 # Sentry-Vision-
 standalone Meta Llama-powered Solidity Contract Verifier
 
- ##Problem: 
+ ## Problem: 
 
 Developers or non-technical founder get either complex Slither reports they don't understand, or generic LLM answers they can't trust.
 
- ##Solution:
+ ## Solution:
 
 1. Developer uploads/pastes a .sol contract
 
@@ -20,7 +20,7 @@ static detection
 
 * Core Differentiation: Not just "find bugs" — visualize how the hack would actually happen.
 
-##Core Architecture
+## Core Architecture
 
    1. User uploads .sol
         ↓
