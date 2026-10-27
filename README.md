@@ -124,7 +124,7 @@ Illustrative shape of the structured JSON (field names may change during develop
 - **Frontend:** 
 HTML and JavaScript with [Mermaid.js](https://mermaid.js.org/)
 - **Output:** Structured JSON Vulnerabilities Report.
- **Deployment:** Render (single service)
+- **Deployment:** Render (single service)
 
 ---
 
