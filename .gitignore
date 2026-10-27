@@ -22,12 +22,12 @@ dist/
 .env.*
 !.env.example
 
-# IDE/editor files
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS generated files
+# OS
 .DS_Store
 Thumbs.db

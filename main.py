@@ -14,9 +14,9 @@ from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 
-API_KEY=<baseten_key>
-BASE_URL=<baseten_openai_base_url>
-MODEL_NAME=<muse_spark_open_1026>
+API_KEY = os.getenv("API_KEY")
+BASE_URL = os.getenv("BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",")
@@ -140,7 +140,7 @@ async def analyze_contract(request: Request, payload: AuditRequest):
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    system_prompt = """You are an expert Web3 security auditor helping a non-technical founder understand the risks in a Solidity contract.
+    system_prompt = """You are an expert Web3 security auditor helping developers and non-technical founders understand the risks in a Solidity contract.
 
     Review the entire contract and find every relevant vulnerability, not just the first one. Look for reentrancy, access control failures, unchecked external calls, unsafe arithmetic, bad state updates, front-running patterns, privilege escalation, and any other meaningful security issues in the code.
 
@@ -161,7 +161,7 @@ async def analyze_contract(request: Request, payload: AuditRequest):
 
     Important rules:
     - Include every material issue you can identify, not just one.
-    - Use plain language a developer and non-technical founder can understand.
+    - Use plain language a developer or non-technical founder can understand.
     - Keep the response concise but complete.
     - Do not include markdown fences.
     - Use severity from this exact list only: Critical, High, Medium, Low, Info.
