@@ -71,7 +71,7 @@ These describe how the app is designed to work. The [progress table](#hackathon-
 
 - **Slither first, model second.** Findings come from a deterministic tool. The model explains and prioritizes them instead of inventing them.
 - **Nothing is silently dropped.** Findings the model considers noise are shown as "Likely false positive" with its reasoning, collapsed by default.
-- **Labeled sources.** Each finding is marked "Confirmed by Slither" or "AI-suspected", so the user can see what is deterministic and what is not.
+- **Labeled sources.** Each finding is marked "Confirmed by Sli ther" or "AI-suspected", so the user can see what is deterministic and what is not.
 - **Reliable diagrams.** The structure of each Mermaid diagram comes from a fixed template (reentrancy, missing access control, unchecked call, and so on). The model fills in only function and variable names, which avoids the syntax errors that free-form model-written diagrams cause.
 - **Verified patches.** A proposed fix is re-analyzed by Slither before it is presented as verified.
 - **Reasoning-aware parsing.** Muse Spark Open always reasons before answering. The backend reads only the final answer, validates it against the JSON schema, and retries once with a repair prompt if validation fails.
@@ -113,17 +113,17 @@ Illustrative shape of the structured JSON (field names may change during develop
 ## Meta models used
 
 - **Muse Spark Open** (`meta-models/muse-spark-open-1026`), Meta's open-weights model, is the core reasoning engine. It is served through Baseten's OpenAI-compatible inference API and handles triage, false-positive reasoning, plain-language explanations, and patch proposals.
-- **Development:** Muse Spark Open through the Meta Model API was also used as a coding assistant while building this project. [TODO: confirm this is accurate before submitting, or delete this line]
+- **Development:** Muse Spark Open through the Meta Model API may also be used as a coding assistant while building this project.
 
 ---
 
 ## Tech stack
 
 - **Backend:** Python, FastAPI
-- **Static analysis:** [Slither](https://github.com/crytic/slither) with `solc-select` for compiler versions
+- **Static analysis:** [Slither](https://github.com/crytic/slither) with `solc-select` for compiler versions (planned)
 - **LLM access:** Muse Spark Open via Baseten's OpenAI-compatible API (OpenAI Python SDK)
 - **Frontend:** HTML and JavaScript with [Mermaid.js](https://mermaid.js.org/)
-- **Deployment:** Docker on Render
+- **Deployment:** Render (single service)
 
 ---
 
@@ -132,7 +132,7 @@ Illustrative shape of the structured JSON (field names may change during develop
 ### Prerequisites
 
 - Python 3.10 or newer
-- An API key with access to Muse Spark Open (the hackathon uses Baseten)
+- An API key with access to Muse Spark Open (hackathon: Baseten)
 
 ### Setup
 
@@ -143,45 +143,42 @@ cd SentryVision
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# Install the Solidity compiler versions you need
-solc-select install 0.8.20
-solc-select use 0.8.20
 ```
 
 ### Configuration
-
-Copy the example file and fill in your own values:
 
 ```bash
 cp .env.example .env
 ```
 
-```
-LLM_API_KEY=your_key_here
-LLM_BASE_URL=https://inference.baseten.co/v1
-LLM_MODEL=meta-models/muse-spark-open-1026
+```env
+API_KEY=your_baseten_api_key
+BASE_URL=https://inference.baseten.co/v1
+MODEL_NAME=meta-models/muse-spark-open-1026
+ALLOWED_ORIGINS=http://localhost:8000
 ```
 
-`LLM_MODEL` must match the model ID your key is allowed to call. **Never commit `.env`.** It is listed in `.gitignore`. On Render, set these values as environment variables in the dashboard.
+`MODEL_NAME` must match the model ID your key can call. **Never commit `.env`.** On Render, set the same variables in the service dashboard.
 
 ### Run
 
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8000
 ```
 
-Then open the app in your browser, paste a contract, and run the analysis.
+- UI: [http://localhost:8000](http://localhost:8000) (requires `index.html`)
+- API: `POST /analyze` with `{ "solidity_code": "..." }`
 
 ---
 
 ## Hackathon progress
 
-Everything in this repository was built from scratch during the hackathon window. An earlier pre-hackathon prototype exists in a separate repository and is **not** part of this submission.
+Everything in this repository is being built during the hackathon window. An earlier pre-hackathon prototype exists in a separate private repository and is **not** part of this submission.
 
 | Milestone | Status |
 | --- | --- |
-| FastAPI endpoint and Muse Spark Open call (via Baseten) | In progress |
+| FastAPI endpoint and Muse Spark Open call (via Baseten) | Done (env-based client + `/analyze`) |
+| Basic UI (`index.html`) | Planned |
 | Slither runner and JSON parsing | Planned |
 | Model triage (confirmed or likely false positive) | Planned |
 | Mermaid exploit-flow templates | Planned |
@@ -206,7 +203,7 @@ The commit history shows when each piece was built.
 ## Roadmap
 
 - Multi-file and import support
-- Secure-flow diagram showing the exploit path after the fix
+- Secure-flow diagram showing the path after the fix
 - Upload an architecture screenshot for analysis (Muse Spark Open supports vision)
 - Integration into the [Crypto Review Lab](https://cryptoreviewlab.com) review workflow
 
@@ -214,14 +211,14 @@ The commit history shows when each piece was built.
 
 ## Credits
 
-- [Slither](https://github.com/crytic/slither) by Trail of Bits (see its repository for license terms)
+- [Slither](https://github.com/crytic/slither) by Trail of Bits
 - [Mermaid.js](https://mermaid.js.org/)
-- Meta, for Muse Spark Open and the hackathon
-- Baseten, for inference credits and hosting
+- Meta — Muse Spark Open and the hackathon
+- Baseten — inference credits and hosting
 
 ## License
 
-MIT. See `LICENSE`.
+MIT (add a `LICENSE` file when ready).
 
 ## Author
 
