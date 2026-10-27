@@ -1,6 +1,8 @@
 # Sentry Vision
 
-**Slither-grounded, Meta-powered Solidity pre-audit triage for developers and non-technical founders.**
+**SentryVision is a standalone smart contract security verifier built for the Meta Hackathon. It analyzes Solidity contracts, identifies vulnerabilities, explains how an exploit would actually happen, and visualizes the attack flow.**
+
+Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta model reasoning to produce structured, auditable, and visual security intelligence.
 
 Paste a smart contract. Sentry Vision finds issues with a deterministic static analyzer, uses Meta's Muse Spark Open model to explain what is actually dangerous, and draws how the exploit would unfold.
 
