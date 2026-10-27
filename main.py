@@ -19,10 +19,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sentryvision")
 
-# LLM_* names match the README.
-API_KEY = os.getenv("API_KEY")
-BASE_URL = os.getenv("BASE_URL")
-MODEL_NAME = os.getenv("MODEL_NAME")
+API_KEY = os.getenv("LLM_API_KEY") 
+BASE_URL = os.getenv("LLM_BASE_URL") 
+MODEL_NAME = os.getenv("LLM_MODEL") 
+
 
 
 # Muse Spark Open always reasons, so leave room for reasoning tokens plus the JSON answer.
