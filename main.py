@@ -179,7 +179,8 @@ Return valid JSON only in this exact shape:
 }
 
 Important rules:
-- Include every material issue you can identify, not just one.
+- Include every material issue you can identify, but report each root cause only once. Do not split one bug into several findings (for example, reentrancy and "wrong order of operations" are the same issue).
+- Put the most severe issues first, and keep Low and Info findings to the few that genuinely matter.
 - Use plain language a developer or non-technical founder can understand.
 - Keep the response concise but complete.
 - Do not include markdown fences.
