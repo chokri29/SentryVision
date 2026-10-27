@@ -209,8 +209,8 @@ The commit history shows when each piece was built.
 - Multi-file and import support
 - Secure-flow diagram showing the path after the fix
 - Upload an architecture screenshot for analysis (Muse Spark Open supports vision)
-- Integration into the project [Crypto Review Lab](https://cryptoreviewlab.com) review workflow
-- Crypto Review Lab [Repository](https://github.com/chokri29/Crypto-Review-Lab)
+- Integration into the digital assets security verification project [cryptoreviewlab.com](https://cryptoreviewlab.com) review workflow
+- CryptoReviewLab [Repository](https://github.com/chokri29/Crypto-Review-Lab)
 
 ---
 
