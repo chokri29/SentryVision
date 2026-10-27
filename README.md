@@ -111,7 +111,7 @@ Illustrative shape of the structured JSON (field names may change during develop
 ## Meta models used
 
 - **Muse Spark Open** (`meta-models/muse-spark-open-1026`), Meta's open-weights model, is the core reasoning engine. It is served through Baseten's OpenAI-compatible inference API and handles triage, false-positive reasoning, plain-language explanations, and patch proposals.
-- **Development:** Muse Spark Open through the Meta Model API may also be used as a coding assistant while building this project.
+- **Development:** Muse Spark Open through the Meta Model API used also as a coding assistant while building this project.
 
 ---
 
