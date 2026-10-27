@@ -117,11 +117,14 @@ Illustrative shape of the structured JSON (field names may change during develop
 
 ## Tech stack
 
-- **Backend:** Python, FastAPI
-- **Static analysis:** [Slither](https://github.com/crytic/slither) with `solc-select` for compiler versions (planned)
-- **LLM access:** Muse Spark Open via Baseten's OpenAI-compatible API (OpenAI Python SDK)
-- **Frontend:** HTML and JavaScript with [Mermaid.js](https://mermaid.js.org/)
-- **Deployment:** Render (single service)
+- **Core AI Engine:** Meta Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten Inference (`https://inference.baseten.co/v1`)
+- **Static Analysis:** 
+[Slither (Solidity & Vyper)](https://github.com/crytic/slither) with `solc-select` for compiler versions (planned)
+- **Backend:** Python, FastAPI, Pydantic
+- **Frontend:** 
+HTML and JavaScript with [Mermaid.js](https://mermaid.js.org/)
+- **Output:** Structured JSON Vulnerabilities Report.
+ **Deployment:** Render (single service)
 
 ---
 
