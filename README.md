@@ -6,8 +6,6 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 Paste a smart contract. Sentry Vision finds issues with a deterministic static analyzer, uses Meta's Muse Spark Open model to explain what is actually dangerous, and draws how the exploit would unfold.
 
-> Built during the Meta Global AI Developer Hackathon (Oct 26 to Nov 4, 2026). Track: Indie Developer. Theme: Build for Your World.
-
 > Sentry Vision is a triage and visualization tool, **not** a formal security audit. See [Limitations](#limitations).
 
 ---
