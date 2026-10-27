@@ -71,7 +71,7 @@ These describe how the app is designed to work. The [progress table](#hackathon-
 
 - **Slither first, model second.** Findings come from a deterministic tool. The model explains and prioritizes them instead of inventing them.
 - **Nothing is silently dropped.** Findings the model considers noise are shown as "Likely false positive" with its reasoning, collapsed by default.
-- **Labeled sources.** Each finding is marked "Confirmed by Sli ther" or "AI-suspected", so the user can see what is deterministic and what is not.
+- **Labeled sources.** Each finding is marked "Confirmed by Slither" or "AI-suspected", so the user can see what is deterministic and what is not.
 - **Reliable diagrams.** The structure of each Mermaid diagram comes from a fixed template (reentrancy, missing access control, unchecked call, and so on). The model fills in only function and variable names, which avoids the syntax errors that free-form model-written diagrams cause.
 - **Verified patches.** A proposed fix is re-analyzed by Slither before it is presented as verified.
 - **Reasoning-aware parsing.** Muse Spark Open always reasons before answering. The backend reads only the final answer, validates it against the JSON schema, and retries once with a repair prompt if validation fails.
