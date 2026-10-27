@@ -63,17 +63,20 @@ flowchart TD
     I --> G
 ```
 
-### Design goals
+### Verification Schema
 
-These describe how the app is designed to work. The [progress table](#hackathon-progress) shows what is implemented so far.
+SentryVision uses a 3-stage verification pipeline:
 
-- **Slither first, model second.** Findings come from a deterministic tool. The model explains and prioritizes them instead of inventing them.
-- **Nothing is silently dropped.** Findings the model considers noise are shown as "Likely false positive" with its reasoning, collapsed by default.
-- **Labeled sources.** Each finding is marked "Confirmed by Slither" or "AI-suspected", so the user can see what is deterministic and what is not.
-- **Reliable diagrams.** The structure of each Mermaid diagram comes from a fixed template (reentrancy, missing access control, unchecked call, and so on). The model fills in only function and variable names, which avoids the syntax errors that free-form model-written diagrams cause.
-- **Verified patches.** A proposed fix is re-analyzed by Slither before it is presented as verified.
-- **Reasoning-aware parsing.** Muse Spark Open always reasons before answering. The backend reads only the final answer, validates it against the JSON schema, and retries once with a repair prompt if validation fails.
-- **Graceful fallback.** If a contract cannot be compiled (for example, because of missing imports), the app says static analysis is unavailable and falls back to a clearly labeled model-only review.
+**F1 - Deterministic Detection:** Slither static analysis on the submitted `.sol` contract produces structured JSON findings.
+
+**F2 - Muse Spark Open Triage:** Meta Muse Spark Open (`meta-models/muse-spark-open-1026` via Baseten) reads both the contract and Slither findings, performs reasoning, and returns structured JSON findings and a patch proposal.
+
+**F3 - Presentation & Verification:**
+- Structured findings are mapped to deterministic Mermaid exploit-flow templates
+- Reasoning-Aware Parsing: The backend reads only the model's final answer, validates it against a Pydantic JSON schema, and retries once with a repair prompt if validation fails
+- Verified Patches: Any proposed fix is re-analyzed by Slither before it is presented as verified. Unverified patches are explicitly labeled as such.
+
+Final output is a Finding Card with severity, plain-language explanation, and a visual attack flowchart. 
 
 ### Target output schema
 
@@ -224,4 +227,4 @@ MIT (add a `LICENSE` file when ready).
 
 ## Author
 
-Chokri ([@chokri29](https://github.com/chokri29))
+Chokri AlGhanmi ([@chokri29](https://github.com/chokri29))
