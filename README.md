@@ -119,7 +119,7 @@ Illustrative shape of the structured JSON (field names may change during develop
 
 - **Core AI Engine:** Meta Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten Inference (`https://inference.baseten.co/v1`)
 - **Static Analysis:** 
-[Slither (Solidity & Vyper)](https://github.com/crytic/slither) with `solc-select` for compiler versions (planned)
+[Slither](https://github.com/crytic/slither) The Static Analyzer for Solidity, with `solc-select` for compiler versions (planned)
 - **Backend:** Python, FastAPI, Pydantic
 - **Frontend:** 
 HTML and JavaScript with [Mermaid.js](https://mermaid.js.org/)
@@ -207,7 +207,7 @@ The commit history shows when each piece was built.
 - Secure-flow diagram showing the path after the fix
 - Upload an architecture screenshot for analysis (Muse Spark Open supports vision)
 - Integration into the [Crypto Review Lab](https://cryptoreviewlab.com) review workflow
-- Crypto Review Lab [GitHub Repo](https://github.com/chokri29/Crypto-Review-Lab)
+- [CryptoReviewLab Repository](https://github.com/chokri29/Crypto-Review-Lab)
 
 ---
 
