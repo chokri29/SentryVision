@@ -74,7 +74,11 @@
       font-size: 0.82rem;
       cursor: pointer;
     }
-    .samples button:hover { border-color: var(--accent); color: #fff; }
+    .samples button:hover,
+    .samples button.active {
+      border-color: var(--accent);
+      color: #fff;
+    }
 
     textarea {
       width: 100%;
@@ -105,6 +109,7 @@
       color: white;
       font-weight: 700;
       font-size: 0.98rem;
+      cursor: pointer;
     }
     .primary-btn:hover { filter: brightness(1.05); }
     .primary-btn:disabled {
@@ -249,14 +254,14 @@
 
     <section class="panel">
       <div class="samples">
-        <button type="button" onclick="loadSample('reentrancy')">Sample: Reentrancy</button>
-        <button type="button" onclick="loadSample('access')">Sample: Access Control</button>
-        <button type="button" onclick="loadSample('unchecked')">Sample: Unchecked Call</button>
+        <button type="button" data-sample="reentrancy" onclick="loadSample('reentrancy')">Sample: Reentrancy</button>
+        <button type="button" data-sample="access" onclick="loadSample('access')">Sample: Access Control</button>
+        <button type="button" data-sample="unchecked" onclick="loadSample('unchecked')">Sample: Unchecked Call</button>
       </div>
 
-      <textarea id="solidityInput" placeholder="pragma solidity ^0.8.0;&#10;&#10;contract YourContract { ... }"></textarea>
+      <textarea id="solidityInput" placeholder="Paste Solidity only (not a JSON wrapper). Example:&#10;&#10;pragma solidity ^0.8.0;&#10;&#10;contract YourContract { ... }"></textarea>
 
-      <button id="analyzeBtn" class="primary-btn" onclick="analyzeContract()">Run AI Audit</button>
+      <button type="button" id="analyzeBtn" class="primary-btn" onclick="analyzeContract()">Run AI Audit</button>
       <div id="status" class="status"></div>
     </section>
 
@@ -276,19 +281,56 @@
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
+    const STORAGE_KEY = 'sentryvision_solidity_input';
+
     const SAMPLES = {
       reentrancy: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract VulnerableBank {\n    mapping(address => uint256) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) external {\n        require(balances[msg.sender] >= amount, "Insufficient balance");\n        (bool success, ) = msg.sender.call{value: amount}("");\n        require(success, "Transfer failed");\n        balances[msg.sender] -= amount;\n    }\n}`,
       access: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract OpenVault {\n    address public owner;\n    mapping(address => uint256) public deposits;\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    function deposit() external payable {\n        deposits[msg.sender] += msg.value;\n    }\n\n    // Missing onlyOwner / access control\n    function emergencyWithdraw(address to, uint256 amount) external {\n        (bool ok, ) = to.call{value: amount}("");\n        require(ok, "transfer failed");\n    }\n}`,
       unchecked: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract Payout {\n    mapping(address => uint256) public owed;\n\n    function setOwed(address user, uint256 amount) external {\n        owed[user] = amount;\n    }\n\n    function claim() external {\n        uint256 amount = owed[msg.sender];\n        // Unchecked external call; no success check, state updated after\n        msg.sender.call{value: amount}("");\n        owed[msg.sender] = 0;\n    }\n}`
     };
 
+    const inputEl = document.getElementById('solidityInput');
+
+    function saveInput() {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, inputEl.value);
+      } catch (_) {}
+    }
+
+    function restoreInput() {
+      try {
+        const saved = sessionStorage.getItem(STORAGE_KEY);
+        if (saved && saved.trim()) {
+          inputEl.value = saved;
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    }
+
+    function setActiveSample(key) {
+      document.querySelectorAll('.samples button').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-sample') === key);
+      });
+    }
+
     function loadSample(key) {
-      document.getElementById('solidityInput').value = SAMPLES[key] || '';
+      inputEl.value = SAMPLES[key] || '';
+      setActiveSample(key);
+      saveInput();
       clearStatus();
       document.getElementById('results').style.display = 'none';
     }
 
-    document.getElementById('solidityInput').value = SAMPLES.reentrancy;
+    // Restore last input (survives Run and refresh within the tab).
+    // Fall back to the reentrancy sample only on first visit.
+    if (!restoreInput()) {
+      loadSample('reentrancy');
+    } else {
+      setActiveSample(null);
+    }
+
+    inputEl.addEventListener('input', saveInput);
 
     function getBackendUrl() {
       const override = document.body.dataset.backendUrl;
@@ -317,6 +359,20 @@
       return 'badge-info';
     }
 
+    /** If the user pastes an API JSON body, pull out solidity_code. */
+    function normalizeCode(raw) {
+      const text = (raw || '').trim();
+      if (!text) return '';
+      if (text.charAt(0) !== '{') return text;
+      try {
+        const obj = JSON.parse(text);
+        if (obj && typeof obj.solidity_code === 'string') {
+          return obj.solidity_code;
+        }
+      } catch (_) {}
+      return text;
+    }
+
     function sanitizeMermaid(raw) {
       if (typeof raw !== 'string' || !raw.trim()) {
         return 'graph TD\nA[Attacker] --> B[Contract]\nB --> C[Exploit]';
@@ -332,7 +388,6 @@
         .replace(/\r/g, '\n')
         .trim();
 
-      // Simplify node labels: strip chars Mermaid often rejects inside []
       cleaned = cleaned.replace(/\[([^\]]*)\]/g, function (_, label) {
         const safe = String(label)
           .replace(/[(){}\[\]"'`<>:;]/g, ' ')
@@ -386,14 +441,12 @@
       ];
 
       fields.forEach(function (pair) {
-        const label = pair[0];
-        const value = pair[1];
         const row = document.createElement('div');
         row.className = 'field';
         const strong = document.createElement('strong');
-        strong.textContent = label;
+        strong.textContent = pair[0];
         const p = document.createElement('p');
-        p.textContent = value || '—';
+        p.textContent = pair[1] || '—';
         row.appendChild(strong);
         row.appendChild(p);
         card.appendChild(row);
@@ -422,7 +475,13 @@
     }
 
     async function analyzeContract() {
-      const code = document.getElementById('solidityInput').value;
+      // Keep whatever the user typed; only normalize JSON wrappers.
+      let code = normalizeCode(inputEl.value);
+      if (code !== inputEl.value) {
+        inputEl.value = code;
+      }
+      saveInput();
+
       const btn = document.getElementById('analyzeBtn');
       const results = document.getElementById('results');
       const findingsEl = document.getElementById('findings');
@@ -485,6 +544,7 @@
         console.error(err);
       } finally {
         btn.disabled = false;
+        saveInput();
       }
     }
   </script>
