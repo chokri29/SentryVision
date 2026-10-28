@@ -339,3 +339,119 @@ contract Payout {
     }
 }`
     };
+
+    function loadSample(key) {
+      document.getElementById('solidityInput').value = SAMPLES[key] || '';
+      clearStatus();
+      document.getElementById('results').style.display = 'none';
+    }
+
+    // Default sample on first load
+    document.getElementById('solidityInput').value = SAMPLES.reentrancy;
+
+    function getBackendUrl() {
+      const override = document.body.dataset.backendUrl;
+      if (override && override.trim()) return override.trim();
+      return '/analyze';
+    }
+
+    function clearStatus() {
+      const el = document.getElementById('status');
+      el.className = 'status';
+      el.textContent = '';
+    }
+
+    function showStatus(type, message) {
+      const el = document.getElementById('status');
+      el.className = 'status ' + type;
+      el.textContent = message;
+    }
+
+    function severityClass(severity) {
+      const s = (severity || 'Info').toLowerCase();
+      if (s === 'critical') return 'badge-critical';
+      if (s === 'high') return 'badge-high';
+      if (s === 'medium') return 'badge-medium';
+      if (s === 'low') return 'badge-low';
+      return 'badge-info';
+    }
+
+    function sanitizeMermaid(raw) {
+      if (typeof raw !== 'string' || !raw.trim()) {
+        return 'graph TD\nA[No diagram] --> B[Available]';
+      }
+
+      let cleaned = raw
+        .replace(/```(?:mermaid)?/gi, '')
+        .replace(/```/g, '')
+        .replace(/`/g, '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/javascript\s*:/gi, '')
+        .replace(/\\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
+
+      const lines = cleaned
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      cleaned = lines.join('\n');
+
+      if (!/^(graph|flowchart)\s+(TD|TB|LR|RL)/i.test(cleaned)) {
+        cleaned = 'graph TD\n' + cleaned;
+      }
+
+      if (cleaned.length < 12) {
+        return 'graph TD\nA[Attacker] --> B[Vulnerable contract]\nB --> C[Exploit step]';
+      }
+
+      return cleaned;
+    }
+
+    function createFindingCard(finding, index) {
+      const card = document.createElement('article');
+      card.className = 'finding';
+
+      const top = document.createElement('div');
+      top.className = 'finding-top';
+
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + severityClass(finding.severity);
+      badge.textContent = finding.severity || 'Info';
+
+      const title = document.createElement('h3');
+      title.textContent = (index + 1) + '. ' + (finding.title || 'Potential issue');
+
+      top.appendChild(badge);
+      top.appendChild(title);
+      card.appendChild(top);
+
+      const fields = [
+        ['What happens', finding.what_happens],
+        ['Why it matters', finding.why_it_matters],
+        ['What to do', finding.what_to_do]
+      ];
+
+      fields.forEach(([label, value]) => {
+        const row = document.createElement('div');
+        row.className = 'field';
+        const strong = document.createElement('strong');
+        strong.textContent = label;
+        const p = document.createElement('p');
+        p.textContent = value || '—';
+        row.appendChild(strong);
+        row.appendChild(p);
+        card.appendChild(row);
+      });
+
+      const diagramWrap = document.createElement('div');
+      diagramWrap.className = 'diagram-wrap';
+      const host = document.createElement('div');
+      host.className = 'mermaid-output';
+      diagramWrap.appendChild(host);
+      card.appendChild(diagramWrap);
+
+      return { card, host, source: sanitizeMermaid(finding.mermaid_diagram) };
+    }
+    
