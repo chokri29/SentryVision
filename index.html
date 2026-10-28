@@ -454,4 +454,84 @@ contract Payout {
 
       return { card, host, source: sanitizeMermaid(finding.mermaid_diagram) };
     }
-    
+ async function renderMermaid(host, source) {
+      try {
+        const id = 'mmd-' + Math.random().toString(36).slice(2);
+        const { svg } = await mermaid.render(id, source);
+        host.innerHTML = svg;
+      } catch (err) {
+        console.error('Mermaid render failed', err, source);
+        host.innerHTML =
+          '<p style="color:#9aa8b8;margin:0;font-size:0.9rem;">Diagram unavailable for this finding.</p>';
+      }
+    }
+
+    async function analyzeContract() {
+      const code = document.getElementById('solidityInput').value;
+      const btn = document.getElementById('analyzeBtn');
+      const results = document.getElementById('results');
+      const findingsEl = document.getElementById('findings');
+      const summaryText = document.getElementById('summaryText');
+
+      if (!code.trim()) {
+        showStatus('error', 'Please paste some Solidity code first.');
+        return;
+      }
+
+      btn.disabled = true;
+      clearStatus();
+      showStatus('loading', 'AI is analyzing the contract…');
+      results.style.display = 'none';
+      findingsEl.innerHTML = '';
+      summaryText.textContent = '';
+
+      try {
+        const response = await fetch(getBackendUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ solidity_code: code })
+        });
+
+        if (!response.ok) {
+          let detail = 'Backend failed to respond.';
+          try {
+            const body = await response.json();
+            detail = body.detail || detail;
+          } catch (_) {
+            const text = await response.text();
+            if (text) detail = text;
+          }
+          throw new Error(detail);
+        }
+
+        const data = await response.json();
+        const findings = Array.isArray(data.findings) ? data.findings : [];
+        summaryText.textContent = typeof data.summary === 'string'
+          ? data.summary
+          : 'No summary provided.';
+        if (findings.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'No vulnerabilities were detected in this contract.';
+          findingsEl.appendChild(empty);
+        } else {
+          for (let i = 0; i < findings.length; i++) {
+            const { card, host, source } = createFindingCard(findings[i], i);
+            findingsEl.appendChild(card);
+            await renderMermaid(host, source);
+          }
+        }
+
+        clearStatus();
+        results.style.display = 'block';
+      } catch (err) {
+        showStatus('error', err.message || 'Something went wrong.');
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
+
