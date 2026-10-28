@@ -244,3 +244,32 @@
       text-align: center;
     }
   </style>
+
+  </head>
+<body data-backend-url="">
+  <div class="wrap">
+    <header>
+      <h1>🛡️ SentryVision</h1>
+      <p>AI-assisted pre-audit triage for Web3 founders. Paste a Solidity contract to get plain-language findings and visual exploit flows.</p>
+    </header>
+
+    <section class="panel">
+      <div class="samples">
+        <button type="button" onclick="loadSample('reentrancy')">Sample: Reentrancy</button>
+        <button type="button" onclick="loadSample('access')">Sample: Access Control</button>
+        <button type="button" onclick="loadSample('unchecked')">Sample: Unchecked Call</button>
+      </div>
+
+      <textarea id="solidityInput" placeholder="pragma solidity ^0.8.0;&#10;&#10;contract YourContract { ... }"></textarea>
+
+      <button id="analyzeBtn" class="primary-btn" onclick="analyzeContract()">Run AI Audit</button>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section id="results">
+      <div class="summary">
+        <h2>Audit Summary</h2>
+        <p id="summaryText"></p>
+      </div>
+      <div id="findings"></div>
+    </section>
