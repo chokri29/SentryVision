@@ -281,7 +281,7 @@
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
-    const STORAGE_KEY = 'sentryvision_solidity_input';
+    const STORAGE_KEY = 'sentryvision_solidity_input_v3';
 
     const SAMPLES = {
       reentrancy: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract VulnerableBank {\n    mapping(address => uint256) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) external {\n        require(balances[msg.sender] >= amount, "Insufficient balance");\n        (bool success, ) = msg.sender.call{value: amount}("");\n        require(success, "Transfer failed");\n        balances[msg.sender] -= amount;\n    }\n}`,
@@ -316,19 +316,16 @@
 
     function loadSample(key) {
       inputEl.value = SAMPLES[key] || '';
+      inputEl.scrollTop = 0; // <-- critical on mobile
       setActiveSample(key);
       saveInput();
       clearStatus();
       document.getElementById('results').style.display = 'none';
     }
 
-    // Restore last input (survives Run and refresh within the tab).
-    // Fall back to the reentrancy sample only on first visit.
-    if (!restoreInput()) {
-      loadSample('reentrancy');
-    } else {
-      setActiveSample(null);
-    }
+    // DEMO MODE: always start fresh, never restore stale code
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    loadSample('reentrancy');
 
     inputEl.addEventListener('input', saveInput);
 

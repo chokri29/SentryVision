@@ -164,7 +164,7 @@ def get_client_ip(request: Request) -> str:
 # --- Slither helpers ---
 def format_slither_for_prompt(detectors: list) -> str:
     if not detectors:
-        return "No Slither findings provided. Rely on source code analysis only."
+        return "No Sli ther findings provided. Rely on source code analysis only."
     slim = [
         {"check": d.get("check"), "impact": d.get("impact"), "confidence": d.get("confidence"),
          "description": (d.get("description") or "")[:500], "lines": d.get("lines", [])}
@@ -178,7 +178,7 @@ def verify_patches(findings: list[Finding]) -> list[Finding]:
         if not f.patched_code:
             f.patch_verification_status = "not_checked"
             continue
-        # Only Slither-verify a complete, compilable contract - not a snippet
+        # Only Sli ther-verify a complete, compilable contract - not a snippet
         if "pragma solidity" not in f.patched_code or "contract " not in f.patched_code:
             f.patch_verified = False
             f.patch_verification_status = "not_checked"
@@ -274,7 +274,10 @@ Return ONLY the corrected valid JSON matching the exact schema from the system p
 async def serve_frontend():
     if not INDEX_FILE.exists():
         return {"service": "SentryVision", "version": "0.3.0", "docs": "/docs", "health": "/health"}
-    return FileResponse(INDEX_FILE)
+    return FileResponse(
+        INDEX_FILE,
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+    )
 
 
 @app.get("/health")
