@@ -1,4 +1,4 @@
-"""SentryVision - Slither Runner
+"""SentryVision - Sli ther Runner
 
 F1: Deterministic static analysis
 Also used for F3 verified patches (re-scan proposed fixes).
@@ -197,9 +197,8 @@ def filter_findings(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def format_slither_for_prompt(findings: List[Dict[str, Any]]) -> str:
     if not findings:
-        return "No high/medium Sniffer detectors fired (or Slither unavailable)."
+        return "No high/medium Slither detectors fired (or Slither unavailable)."
 
-    # Fix typo-safe wording
     lines = ["Slither static analysis (filtered high/medium detectors):"]
     for i, f in enumerate(findings, 1):
         lines_info = f.get("lines") or []
@@ -225,7 +224,7 @@ def format_slither_for_prompt(findings: List[Dict[str, Any]]) -> str:
 def run_slither(
     source_code: str, contract_name: str = "Contract.sol"
 ) -> Optional[Dict[str, Any]]:
-    """Run Sli ther on source code string.
+    """Run Slither on source code string.
 
     Returns:
         {
