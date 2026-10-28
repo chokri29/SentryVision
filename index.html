@@ -273,3 +273,69 @@
       </div>
       <div id="findings"></div>
     </section>
+
+    <footer>
+      Prototype for the Meta AI Developer Hackathon · Not a formal security audit
+    </footer>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+
+    const SAMPLES = {
+      reentrancy: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract VulnerableBank {
+    mapping(address => uint256) public balances;
+
+    function deposit() external payable {
+        balances[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balances[msg.sender] >= amount, "Insufficient balance");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Transfer failed");
+        balances[msg.sender] -= amount;
+    }
+}`,
+      access: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract OpenVault {
+    address public owner;
+    mapping(address => uint256) public deposits;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    function deposit() external payable {
+        deposits[msg.sender] += msg.value;
+    }
+
+    // Missing onlyOwner / access control
+    function emergencyWithdraw(address to, uint256 amount) external {
+        (bool ok, ) = to.call{value: amount}("");
+        require(ok, "transfer failed");
+    }
+}`,
+      unchecked: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract Payout {
+    mapping(address => uint256) public owed;
+
+    function setOwed(address user, uint256 amount) external {
+        owed[user] = amount;
+    }
+
+    function claim() external {
+        uint256 amount = owed[msg.sender];
+        // Unchecked external call; no success check, state updated after
+        msg.sender.call{value: amount}("");
+        owed[msg.sender] = 0;
+    }
+}`
+    };
