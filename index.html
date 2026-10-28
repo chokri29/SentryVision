@@ -22,10 +22,6 @@
       --low: #38bdf8;
       --info: #94a3b8;
     }
-  --medium: #fbbf24;
-      --low: #38bdf8;
-      --info: #94a3b8;
-    }
 
     * { box-sizing: border-box; }
     body {
@@ -216,8 +212,8 @@
       background: #0d131a;
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 14px;
       overflow-x: auto;
+      padding: 14px;
     }
     .diagram-wrap .mermaid-output {
       display: flex;
@@ -244,13 +240,12 @@
       text-align: center;
     }
   </style>
-
-  </head>
+</head>
 <body data-backend-url="">
   <div class="wrap">
     <header>
       <h1>🛡️ SentryVision</h1>
-      <p>AI-assisted pre-audit triage for Web3 founders. Paste a Solidity contract to get plain-language findings and visual exploit flows.</p>
+      <p>AI-assisted pre-audit triage for developers and non-technical founders. Paste a Solidity contract to get plain-language findings and visual exploit flows.</p>
     </header>
 
     <section class="panel">
@@ -454,7 +449,8 @@ contract Payout {
 
       return { card, host, source: sanitizeMermaid(finding.mermaid_diagram) };
     }
- async function renderMermaid(host, source) {
+
+    async function renderMermaid(host, source) {
       try {
         const id = 'mmd-' + Math.random().toString(36).slice(2);
         const { svg } = await mermaid.render(id, source);
@@ -509,6 +505,7 @@ contract Payout {
         summaryText.textContent = typeof data.summary === 'string'
           ? data.summary
           : 'No summary provided.';
+
         if (findings.length === 0) {
           const empty = document.createElement('div');
           empty.className = 'empty';
@@ -534,4 +531,3 @@ contract Payout {
   </script>
 </body>
 </html>
-
