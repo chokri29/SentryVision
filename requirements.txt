@@ -2,7 +2,6 @@ fastapi
 uvicorn
 openai
 python-dotenv
-pydantic
 pytest
 httpx
 slither-analyzer
