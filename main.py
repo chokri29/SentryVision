@@ -29,10 +29,8 @@ API_KEY = os.getenv("LLM_API_KEY")
 BASE_URL = os.getenv("LLM_BASE_URL")
 MODEL_NAME = os.getenv("LLM_MODEL")
 
-# Muse Spark Open always reasons, so leave room for reasoning tokens plus the JSON answer.
 MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
-# Only enable if the provider supports response_format={"type": "json_object"}.
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
 
 ALLOWED_ORIGINS = [
@@ -98,7 +96,6 @@ class Finding(BaseModel):
     @field_validator("severity", mode="before")
     @classmethod
     def normalize_severity(cls, value):
-        # Accept "high", "HIGH", " High " and so on.
         if isinstance(value, str):
             return value.strip().capitalize()
         return value
@@ -129,7 +126,6 @@ def enforce_rate_limit(client_ip: str) -> None:
 
     history.append(now)
 
-    # Keep memory bounded: drop idle clients once the table grows.
     if len(request_history) > 1000:
         idle = [
             ip
@@ -141,10 +137,6 @@ def enforce_rate_limit(client_ip: str) -> None:
 
 
 def extract_json_text(raw: str) -> str:
-    """Pull the JSON object out of a model reply.
-
-    Handles <think>...</think> blocks, markdown fences, and stray text around the JSON.
-    """
     text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
     start, end = text.find("{"), text.rfind("}")
@@ -223,7 +215,6 @@ REPAIR_MESSAGE = {
 
 @app.get("/")
 async def serve_frontend():
-    """Serve the single-page UI from the same origin as /analyze."""
     if not INDEX_FILE.exists():
         raise HTTPException(status_code=404, detail="index.html not found")
     return FileResponse(INDEX_FILE)
@@ -237,8 +228,6 @@ async def health():
     }
 
 
-# Plain `def` (not `async def`): FastAPI runs it in a worker thread, so the slow,
-# blocking model / Slither calls do not freeze the server for other requests.
 @app.post("/analyze")
 def analyze_contract(request: Request, payload: AuditRequest):
     client_ip = request.client.host if request.client else "unknown"
@@ -266,9 +255,23 @@ def analyze_contract(request: Request, payload: AuditRequest):
         ) from exc
 
     # F1 — deterministic static analysis (optional; never blocks Muse path)
-    slither_findings, slither_error = run_slither(code)
-    if slither_error:
+    slither_result = run_slither(code)
+    if slither_result is None:
+        slither_findings: list = []
+        slither_error: str | None = "Slither unavailable"
+    elif not slither_result.get("success"):
+        slither_findings = []
+        slither_error = slither_result.get("error") or "Slither failed"
         logger.info("Slither fallback to Muse-only: %s", slither_error)
+    else:
+        slither_findings = slither_result.get("filtered_detectors") or []
+        slither_error = None
+        logger.info(
+            "Slither: %s raw, %s filtered",
+            slither_result.get("count"),
+            slither_result.get("filtered_count"),
+        )
+
     slither_block = format_slither_for_prompt(slither_findings)
 
     messages = [
@@ -294,7 +297,6 @@ def analyze_contract(request: Request, payload: AuditRequest):
             response = model_client.chat.completions.create(**kwargs)
             raw_content = response.choices[0].message.content
             result = parse_and_validate_model_output(raw_content).model_dump()
-            # Optional debug metadata for demos / judges (UI can ignore).
             result["meta"] = {
                 "slither_available": slither_available(),
                 "slither_findings_count": len(slither_findings),
@@ -318,7 +320,6 @@ def analyze_contract(request: Request, payload: AuditRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    # proxy_headers lets rate limiting see the real client IP behind Render's proxy.
     uvicorn.run(
         app,
         host="0.0.0.0",
