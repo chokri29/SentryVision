@@ -105,7 +105,6 @@
       color: white;
       font-weight: 700;
       font-size: 0.98rem;
-      cursor: pointer;
     }
     .primary-btn:hover { filter: brightness(1.05); }
     .primary-btn:disabled {
@@ -278,61 +277,9 @@
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
     const SAMPLES = {
-      reentrancy: `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract VulnerableBank {
-    mapping(address => uint256) public balances;
-
-    function deposit() external payable {
-        balances[msg.sender] += msg.value;
-    }
-
-    function withdraw(uint256 amount) external {
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Transfer failed");
-        balances[msg.sender] -= amount;
-    }
-}`,
-      access: `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract OpenVault {
-    address public owner;
-    mapping(address => uint256) public deposits;
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    function deposit() external payable {
-        deposits[msg.sender] += msg.value;
-    }
-
-    // Missing onlyOwner / access control
-    function emergencyWithdraw(address to, uint256 amount) external {
-        (bool ok, ) = to.call{value: amount}("");
-        require(ok, "transfer failed");
-    }
-}`,
-      unchecked: `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract Payout {
-    mapping(address => uint256) public owed;
-
-    function setOwed(address user, uint256 amount) external {
-        owed[user] = amount;
-    }
-
-    function claim() external {
-        uint256 amount = owed[msg.sender];
-        // Unchecked external call; no success check, state updated after
-        msg.sender.call{value: amount}("");
-        owed[msg.sender] = 0;
-    }
-}`
+      reentrancy: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract VulnerableBank {\n    mapping(address => uint256) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) external {\n        require(balances[msg.sender] >= amount, "Insufficient balance");\n        (bool success, ) = msg.sender.call{value: amount}("");\n        require(success, "Transfer failed");\n        balances[msg.sender] -= amount;\n    }\n}`,
+      access: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract OpenVault {\n    address public owner;\n    mapping(address => uint256) public deposits;\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    function deposit() external payable {\n        deposits[msg.sender] += msg.value;\n    }\n\n    // Missing onlyOwner / access control\n    function emergencyWithdraw(address to, uint256 amount) external {\n        (bool ok, ) = to.call{value: amount}("");\n        require(ok, "transfer failed");\n    }\n}`,
+      unchecked: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract Payout {\n    mapping(address => uint256) public owed;\n\n    function setOwed(address user, uint256 amount) external {\n        owed[user] = amount;\n    }\n\n    function claim() external {\n        uint256 amount = owed[msg.sender];\n        // Unchecked external call; no success check, state updated after\n        msg.sender.call{value: amount}("");\n        owed[msg.sender] = 0;\n    }\n}`
     };
 
     function loadSample(key) {
@@ -341,7 +288,6 @@ contract Payout {
       document.getElementById('results').style.display = 'none';
     }
 
-    // Default sample on first load
     document.getElementById('solidityInput').value = SAMPLES.reentrancy;
 
     function getBackendUrl() {
@@ -373,7 +319,7 @@ contract Payout {
 
     function sanitizeMermaid(raw) {
       if (typeof raw !== 'string' || !raw.trim()) {
-        return 'graph TD\nA[No diagram] --> B[Available]';
+        return 'graph TD\nA[Attacker] --> B[Contract]\nB --> C[Exploit]';
       }
 
       let cleaned = raw
@@ -386,10 +332,21 @@ contract Payout {
         .replace(/\r/g, '\n')
         .trim();
 
+      // Simplify node labels: strip chars Mermaid often rejects inside []
+      cleaned = cleaned.replace(/\[([^\]]*)\]/g, function (_, label) {
+        const safe = String(label)
+          .replace(/[(){}\[\]"'`<>:;]/g, ' ')
+          .replace(/[^\w\s.-]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 40) || 'step';
+        return '[' + safe + ']';
+      });
+
       const lines = cleaned
         .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+        .map(function (line) { return line.trim(); })
+        .filter(function (line) { return line.length > 0; });
 
       cleaned = lines.join('\n');
 
@@ -428,7 +385,9 @@ contract Payout {
         ['What to do', finding.what_to_do]
       ];
 
-      fields.forEach(([label, value]) => {
+      fields.forEach(function (pair) {
+        const label = pair[0];
+        const value = pair[1];
         const row = document.createElement('div');
         row.className = 'field';
         const strong = document.createElement('strong');
@@ -447,14 +406,14 @@ contract Payout {
       diagramWrap.appendChild(host);
       card.appendChild(diagramWrap);
 
-      return { card, host, source: sanitizeMermaid(finding.mermaid_diagram) };
+      return { card: card, host: host, source: sanitizeMermaid(finding.mermaid_diagram) };
     }
 
     async function renderMermaid(host, source) {
       try {
         const id = 'mmd-' + Math.random().toString(36).slice(2);
-        const { svg } = await mermaid.render(id, source);
-        host.innerHTML = svg;
+        const result = await mermaid.render(id, source);
+        host.innerHTML = result.svg;
       } catch (err) {
         console.error('Mermaid render failed', err, source);
         host.innerHTML =
@@ -513,9 +472,9 @@ contract Payout {
           findingsEl.appendChild(empty);
         } else {
           for (let i = 0; i < findings.length; i++) {
-            const { card, host, source } = createFindingCard(findings[i], i);
-            findingsEl.appendChild(card);
-            await renderMermaid(host, source);
+            const built = createFindingCard(findings[i], i);
+            findingsEl.appendChild(built.card);
+            await renderMermaid(built.host, built.source);
           }
         }
 
