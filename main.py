@@ -44,7 +44,6 @@ MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
-# Cap how many Muse patches we re-verify (each is a full Slither run).
 MAX_PATCH_VERIFICATIONS = int(os.getenv("MAX_PATCH_VERIFICATIONS", "3"))
 
 ALLOWED_ORIGINS = [
@@ -187,21 +186,32 @@ def format_slither_for_prompt(detectors: list) -> str:
 
 
 def verify_patches(findings: list[Finding]) -> list[Finding]:
+    """F3 — only run Slither on full proposed patches (skip when Muse returned none)."""
+    # Fast path: no proposed patches at all → zero Slither work
+    has_any_patch = any((f.patched_code or "").strip() for f in findings)
+    if not has_any_patch:
+        for f in findings:
+            f.patch_verification_status = "not_checked"
+        return findings
+
+    slither_ready = ENABLE_SLITHER and is_slither_available()
     verified_count = 0
+
     for f in findings:
-        if not f.patched_code:
+        code = (f.patched_code or "").strip()
+        if not code:
             f.patch_verification_status = "not_checked"
             continue
 
-        if "pragma solidity" not in f.patched_code or "contract " not in f.patched_code:
+        if "pragma solidity" not in code or "contract " not in code:
             f.patch_verified = False
             f.patch_verification_status = "not_checked"
             f.patch_verification_details = (
-                "Patch is a code snippet, not a full contract. Sli ther verification skipped."
+                "Patch is a code snippet, not a full contract. Slither verification skipped."
             )
             continue
 
-        if not ENABLE_SLITHER or not is_slither_available():
+        if not slither_ready:
             f.patch_verified = False
             f.patch_verification_status = "slither_unavailable"
             f.patch_verification_details = (
@@ -217,7 +227,7 @@ def verify_patches(findings: list[Finding]) -> list[Finding]:
             )
             continue
 
-        result = verify_patch(f.patched_code)
+        result = verify_patch(code)
         verified_count += 1
         f.patch_verified = result.get("patch_verified", False)
         f.patch_verification_status = result.get("patch_verification_status", "failed")
