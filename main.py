@@ -46,7 +46,8 @@ MODEL_NAME = os.getenv("LLM_MODEL") or os.getenv("LLM_MODEL_ID", "meta-models/mu
 MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
-ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "false").strip().lower() == "true"
+# Default ON for Docker/production; set ENABLE_SLITHER=false to force Muse-only.
+ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:8000,http://localhost:5173").split(",") if o.strip()
@@ -164,7 +165,7 @@ def get_client_ip(request: Request) -> str:
 # --- Slither helpers ---
 def format_slither_for_prompt(detectors: list) -> str:
     if not detectors:
-        return "No Sli ther findings provided. Rely on source code analysis only."
+        return "No Slither findings provided. Rely on source code analysis only."
     slim = [
         {"check": d.get("check"), "impact": d.get("impact"), "confidence": d.get("confidence"),
          "description": (d.get("description") or "")[:500], "lines": d.get("lines", [])}
@@ -178,7 +179,7 @@ def verify_patches(findings: list[Finding]) -> list[Finding]:
         if not f.patched_code:
             f.patch_verification_status = "not_checked"
             continue
-        # Only Sli ther-verify a complete, compilable contract - not a snippet
+        # Only Slither-verify a complete, compilable contract - not a snippet
         if "pragma solidity" not in f.patched_code or "contract " not in f.patched_code:
             f.patch_verified = False
             f.patch_verification_status = "not_checked"
@@ -282,11 +283,12 @@ async def serve_frontend():
 
 @app.get("/health")
 async def health():
+    available = is_slither_available()
     return {
         "status": "ok",
         "model": MODEL_NAME,
         "base_url": BASE_URL,
-        "slither_available": is_slither_available() if ENABLE_SLITHER else False,
+        "slither_available": available,
         "slither_enabled": ENABLE_SLITHER,
     }
 
@@ -356,7 +358,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
                 meta={
                     "model": MODEL_NAME,
                     "reasoning_repaired": attempt > 0,
-                    "slither_available": is_slither_available() if ENABLE_SLITHER else False,
+                    "slither_available": is_slither_available(),
                     "slither_enabled": ENABLE_SLITHER,
                     "slither_findings_count": len(slither_findings),
                     "slither_error": slither_error,
