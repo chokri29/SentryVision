@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
 ```
 
@@ -141,7 +141,7 @@ uvicorn main:app --reload --port 8000
 ## Demo for judges (3 clicks)
 
 1. Open the live app (or `http://localhost:8000` after Docker/local start).
-2. Click **examples/01 · Reentrancy** (same source as [`examples/01_reentrancy.sol`](examples/01_reentrancy.sol)).
+2. Click **Reentrancy** (same source as [`examples/01_reentrancy.sol`](examples/01_reentrancy.sol)).
 3. Click **Run Meta-assisted Audit**.
 
 **What to look for**
@@ -151,10 +151,10 @@ uvicorn main:app --reload --port 8000
 | Summary meta line | `Slither findings: N · Patches verified: M · Pipeline: F1 → F2 → F3` |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
 | Mermaid flowchart | Visual exploit path (presentation layer) |
-| **Patch verified by Slither** (green) | F3: Slither no longer reports High/Medium on that patch (not a full audit) |
+| **Patch verified by Slither** (green) | F3: Sli ther no longer reports High/Medium on that patch (not a full audit) |
 | **Fix proposed** | Muse returned a full patched contract |
 
-Optional: try **examples/02 · Access Control** and **examples/03 · Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
+Optional: try **Access Control** and **Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
 
 ---
 
@@ -162,9 +162,9 @@ Optional: try **examples/02 · Access Control** and **examples/03 · Unchecked C
 
 | File | UI sample | Expected primary issues |
 | --- | --- | --- |
-| [`01_reentrancy.sol`](examples/01_reentrancy.sol) | examples/01 · Reentrancy | Reentrancy (external call before balance update) |
-| [`02_missing_access_control.sol`](examples/02_missing_access_control.sol) | examples/02 · Access Control | Missing access control on `emergencyWithdraw` |
-| [`03_unchecked_call.sol`](examples/03_unchecked_call.sol) | examples/03 · Unchecked Call | Unchecked low-level call / CEI-style issues |
+| [`01_reentrancy.sol`](examples/01_reentrancy.sol) | Reentrancy | Reentrancy (external call before balance update) |
+| [`02_missing_access_control.sol`](examples/02_missing_access_control.sol) | Access Control | Missing access control on `emergencyWithdraw` |
+| [`03_unchecked_call.sol`](examples/03_unchecked_call.sol) | Unchecked Call | Unchecked low-level call / CEI-style issues |
 | [`04_tx_origin_auth.sol`](examples/04_tx_origin_auth.sol) | — | `tx.origin` authentication |
 | [`05_safe_minimal.sol`](examples/05_safe_minimal.sol) | — | Ideally no Critical/High findings |
 
@@ -178,13 +178,14 @@ Everything in this repository is being built during the hackathon window. An ear
 
 | Milestone | Status |
 | --- | --- |
-| FastAPI endpoint and Muse Spark Open call (via Baseten) | Done |
-| UI (`index.html`) with finding cards + Mermaid flows | Done |
-| F1 Slither runner (Docker + solc) | Done |
-| F2 Muse triage + plain-language findings | Done |
-| F3 patch proposal + Slither re-verification | Done |
-| Sample contracts aligned with UI buttons | Done |
-| Live deploy on Render | Done |
+| FastAPI + Muse Spark Open via Baseten (`/analyze`) | Done |
+| UI: finding cards, severity badges, Mermaid flows | Done |
+| F1 Slither (Docker image + `solc-select`) | Done |
+| F2 Muse triage, plain language, patch proposal | Done |
+| F3 Sli ther re-verification on proposed patches | Done |
+| Sample contracts (UI buttons + `examples/*.sol`) | Done |
+| Live deploy on Render (Docker) | Done |
+| Collapsible patches, F3 skip when no patch | Done |
 | Demo video | Planned |
 
 The commit history shows when each piece was built.
