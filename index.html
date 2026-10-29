@@ -19,48 +19,24 @@
       color: var(--text); min-height: 100vh;
     }
     .wrap { max-width: 960px; margin: 0 auto; padding: 28px 18px 60px; }
-    header {
-      margin-bottom: 28px;
-      padding-bottom: 4px;
-    }
+    header { margin-bottom: 28px; padding-bottom: 4px; }
     header h1 {
-      margin: 0 0 10px;
-      font-size: 1.85rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.2;
+      margin: 0 0 10px; font-size: 1.85rem; font-weight: 700;
+      letter-spacing: -0.03em; line-height: 1.2;
     }
     header .tagline {
-      margin: 0 0 14px;
-      color: var(--muted);
-      font-size: 0.95rem;
-      line-height: 1.55;
-      max-width: 36em;
+      margin: 0 0 14px; color: var(--muted); font-size: 0.95rem;
+      line-height: 1.55; max-width: 36em;
     }
-    .status-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 0 0 16px;
-    }
+    .status-pills { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
     .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px 6px 10px;
-      border-radius: 999px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      font-size: 0.78rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      color: #c5d0dc;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px 6px 10px; border-radius: 999px;
+      background: var(--panel); border: 1px solid var(--border);
+      font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; color: #c5d0dc;
     }
     .status-pill .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
       animation: status-pulse 2s ease-out infinite;
     }
     .status-pill.slither .dot {
@@ -77,6 +53,16 @@
     .status-pill .value { color: #e8eef6; }
     .status-pill.slither .value { color: #86efac; }
     .status-pill.model .value { color: #67e8f9; }
+    .status-pill.checking .dot {
+      background: #94a3b8; animation: none; box-shadow: none; opacity: 0.7;
+    }
+    .status-pill.checking .value { color: #94a3b8; }
+    .status-pill.off .dot {
+      background: #f87171; animation: none; box-shadow: none;
+    }
+    .status-pill.off .value { color: #fca5a5; }
+    .status-pill.off { border-color: rgba(248, 113, 113, 0.35); }
+    .status-pill.slither:not(.off):not(.checking) .dot { background: #4ade80; }
     @keyframes status-pulse {
       0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
       70% { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
@@ -88,17 +74,11 @@
       100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
     }
     header p.pipeline {
-      margin: 0;
-      padding: 12px 14px;
+      margin: 0; padding: 12px 14px;
       background: rgba(34, 211, 238, 0.06);
       border: 1px solid rgba(34, 211, 238, 0.18);
-      border-radius: 12px;
-      font-size: 0.86rem;
-      color: #b7c6d6;
-      line-height: 1.5;
-      overflow-wrap: normal;
-      word-break: normal;
-      hyphens: none;
+      border-radius: 12px; font-size: 0.86rem; color: #b7c6d6; line-height: 1.5;
+      overflow-wrap: normal; word-break: normal; hyphens: none;
     }
     header p.pipeline strong { color: var(--cyan); font-weight: 700; }
     header p.pipeline em { color: #4ade80; font-style: normal; font-weight: 600; }
@@ -168,15 +148,15 @@
       <h1>🛡️ SentryVision</h1>
       <p class="tagline">Meta AI-assisted pre-audit triage for developers and non-technical founders.</p>
       <div class="status-pills" aria-label="Live service status">
-        <span class="status-pill slither">
+        <span class="status-pill slither checking" id="pillSlither">
           <span class="dot" aria-hidden="true"></span>
           <span class="label">Slither</span>
-          <span class="value">ON</span>
+          <span class="value" id="pillSlitherValue">…</span>
         </span>
-        <span class="status-pill model">
+        <span class="status-pill model checking" id="pillModel">
           <span class="dot" aria-hidden="true"></span>
           <span class="label">Model</span>
-          <span class="value">Muse Spark Open (Baseten)</span>
+          <span class="value" id="pillModelValue">…</span>
         </span>
       </div>
       <p class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains &amp; proposes a fix → <strong>F3 Slither</strong> re-checks the patch. Green <em>Patch verified by Slither</em> means Slither no longer reports High/Medium issues on that patch — not that the contract is fully safe.</p>
@@ -204,6 +184,54 @@
   </div>
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+
+    function setPill(el, valueEl, state, text) {
+      if (!el || !valueEl) return;
+      el.classList.remove('checking', 'off');
+      if (state === 'off') el.classList.add('off');
+      else if (state === 'checking') el.classList.add('checking');
+      valueEl.textContent = text;
+    }
+
+    async function refreshHealthStatus() {
+      const slitherEl = document.getElementById('pillSlither');
+      const slitherVal = document.getElementById('pillSlitherValue');
+      const modelEl = document.getElementById('pillModel');
+      const modelVal = document.getElementById('pillModelValue');
+      setPill(slitherEl, slitherVal, 'checking', '…');
+      setPill(modelEl, modelVal, 'checking', '…');
+      try {
+        const res = await fetch('/health', { cache: 'no-store' });
+        if (!res.ok) throw new Error('health ' + res.status);
+        const data = await res.json();
+        const slitherOn = !!(data.slither_available && data.slither_enabled !== false);
+        if (slitherOn) {
+          setPill(slitherEl, slitherVal, 'on', 'ON');
+        } else if (data.slither_enabled === false) {
+          setPill(slitherEl, slitherVal, 'off', 'OFF');
+        } else {
+          setPill(slitherEl, slitherVal, 'off', 'Unavailable');
+        }
+        const modelName = (data.model || '').toString();
+        let modelLabel = 'Muse Spark Open (Baseten)';
+        if (modelName) {
+          if (modelName.indexOf('muse-spark') !== -1) {
+            modelLabel = 'Muse Spark Open (Baseten)';
+          } else {
+            modelLabel = modelName.length > 36 ? modelName.slice(0, 34) + '…' : modelName;
+          }
+        }
+        setPill(modelEl, modelVal, 'on', modelLabel);
+      } catch (err) {
+        console.warn('Health check failed', err);
+        setPill(slitherEl, slitherVal, 'off', 'Unavailable');
+        setPill(modelEl, modelVal, 'off', 'Unavailable');
+      }
+    }
+
+    refreshHealthStatus();
+    setInterval(refreshHealthStatus, 60000);
+
     const STORAGE_KEY = 'sentryvision_solidity_input_v3';
     const SAMPLES = {
       reentrancy: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract VulnerableBank {\n    mapping(address => uint256) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) external {\n        require(balances[msg.sender] >= amount, "Insufficient balance");\n        (bool success, ) = msg.sender.call{value: amount}("");\n        require(success, "Transfer failed");\n        balances[msg.sender] -= amount;\n    }\n}`,
@@ -400,7 +428,7 @@
           ? meta.pipeline_label
           : (meta.slither_error
               ? 'F2 only (static analysis unavailable)'
-              : 'F1 Sli ther → F2 Muse → F3 verify');
+              : 'F1 Slither → F2 Muse → F3 verify');
         if (summaryMeta) {
           let line =
             'Slither findings: ' + slitherN +
