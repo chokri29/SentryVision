@@ -8,7 +8,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 ---
 
-## Why not just Sli ther, or just an LLM?
+## Why not just Slither, or just an LLM?
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
@@ -43,7 +43,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | --- | --- | --- |
 | **F1** | Deterministic static signal | Slither |
 | **F2** | Triage, plain-language explanation, patch proposal, Mermaid exploit flow | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
-| **F3** | Patch re-verification (Slither re-check) | Slither on proposed `patched_code` |
+| **F3** | Patch re-verification (Slither re-check) | Sli ther on proposed `patched_code` |
 
 ```mermaid
 flowchart TD
@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Sli ther re-verification"]
+    H --> I["F3: Slither re-verification"]
     I --> G
 ```
 
