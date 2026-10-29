@@ -237,6 +237,54 @@
       border-radius: 12px;
     }
 
+    .patch-row {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .patch-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .badge-verified {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.35);
+    }
+    .badge-failed {
+      background: rgba(248, 113, 113, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(248, 113, 113, 0.35);
+    }
+    .badge-pending {
+      background: rgba(148, 163, 184, 0.14);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+    .patch-details {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .patch-code {
+      width: 100%;
+      max-height: 220px;
+      overflow: auto;
+      background: #0d131a;
+      color: #7dd3c7;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.4;
+      white-space: pre;
+    }
+
     footer {
       margin-top: 18px;
       color: #6b7a8c;
@@ -413,6 +461,21 @@
       return cleaned;
     }
 
+    function patchStatusClass(status) {
+      const s = (status || 'not_checked').toLowerCase();
+      if (s === 'verified') return 'badge-verified';
+      if (s === 'failed') return 'badge-failed';
+      return 'badge-pending';
+    }
+
+    function patchStatusLabel(status, verified) {
+      const s = (status || 'not_checked').toLowerCase();
+      if (s === 'verified' || verified === true) return 'Patch verified by Slither';
+      if (s === 'failed') return 'Patch failed Slither re-check';
+      if (s === 'slither_unavailable') return 'Patch awaiting Slither';
+      return 'Patch not checked';
+    }
+
     function createFindingCard(finding, index) {
       const card = document.createElement('article');
       card.className = 'finding';
@@ -448,6 +511,56 @@
         row.appendChild(p);
         card.appendChild(row);
       });
+
+      // F3 — Verified Patches
+      const hasPatch = typeof finding.patched_code === 'string' && finding.patched_code.trim().length > 0;
+      const status = finding.patch_verification_status || 'not_checked';
+      if (hasPatch || status !== 'not_checked') {
+        const patchRow = document.createElement('div');
+        patchRow.className = 'patch-row';
+
+        const badges = document.createElement('div');
+        badges.className = 'patch-badges';
+
+        const pBadge = document.createElement('span');
+        pBadge.className = 'badge ' + patchStatusClass(status);
+        pBadge.textContent = patchStatusLabel(status, finding.patch_verified);
+        badges.appendChild(pBadge);
+
+        if (hasPatch) {
+          const codeBadge = document.createElement('span');
+          codeBadge.className = 'badge badge-info';
+          codeBadge.textContent = 'Fix proposed';
+          badges.appendChild(codeBadge);
+        }
+        patchRow.appendChild(badges);
+
+        if (finding.patch_verification_details) {
+          const details = document.createElement('p');
+          details.className = 'patch-details';
+          details.textContent = finding.patch_verification_details;
+          patchRow.appendChild(details);
+        }
+
+        if (hasPatch) {
+          const label = document.createElement('strong');
+          label.textContent = 'Proposed patch';
+          label.style.display = 'block';
+          label.style.fontSize = '0.78rem';
+          label.style.color = '#b7c6d6';
+          label.style.marginBottom = '6px';
+          label.style.textTransform = 'uppercase';
+          label.style.letterSpacing = '0.04em';
+          patchRow.appendChild(label);
+
+          const pre = document.createElement('pre');
+          pre.className = 'patch-code';
+          pre.textContent = finding.patched_code;
+          patchRow.appendChild(pre);
+        }
+
+        card.appendChild(patchRow);
+      }
 
       const diagramWrap = document.createElement('div');
       diagramWrap.className = 'diagram-wrap';
