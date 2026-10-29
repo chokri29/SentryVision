@@ -1,11 +1,7 @@
-"""SentryVision - Sli ther Runner
+"""SentryVision - Slither Runner
 
 F1: Deterministic static analysis
 Also used for F3 verified patches (re-scan proposed fixes).
-
-Merged design:
-- Muse Spark structure: JSON file output, solc-select, verify_patch, rich result dict
-- Noise filter + prompt formatter + ENABLE_SLITHER flag for safe Muse grounding
 """
 
 from __future__ import annotations
@@ -21,15 +17,15 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("sentryvision.slither")
 
-SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "120"))
+SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {
     "1",
     "true",
     "yes",
     "on",
 }
+DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20")
 
-# Keep Muse focused on real security detectors, not style noise.
 KEEP_IMPACTS = {"High", "Medium", "Critical"}
 
 PRIORITY_CHECKS = {
@@ -76,9 +72,6 @@ DROP_CHECKS = {
 }
 
 
-# ------------------------------------------------------------------
-# Availability
-# ------------------------------------------------------------------
 def is_slither_available() -> bool:
     if not ENABLE_SLITHER:
         return False
@@ -94,26 +87,31 @@ def is_slither_available() -> bool:
         return False
 
 
-# Backwards-compatible name used by main.py health check
 def slither_available() -> bool:
     return is_slither_available()
 
 
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
 def _safe_filename(contract_name: str) -> str:
     name = Path(contract_name or "Contract.sol").name
     name = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)
     return name if name.endswith(".sol") else f"{name}.sol"
 
 
+def _normalize_pragma(source_code: str) -> str:
+    """Pin pragma to an installed exact version so crytic-compile/solc succeeds."""
+    pinned = f"pragma solidity {DEFAULT_SOLC};"
+    if re.search(r"pragma\s+solidity\s+[^;]+;", source_code):
+        return re.sub(r"pragma\s+solidity\s+[^;]+;", pinned, source_code, count=1)
+    spdx = re.search(r"//\s*SPDX-License-Identifier:[^\n]*\n", source_code)
+    if spdx:
+        idx = spdx.end()
+        return source_code[:idx] + pinned + "\n" + source_code[idx:]
+    return pinned + "\n" + source_code
+
+
 def _try_set_solc_version(source_code: str) -> None:
-    """Best effort: if code has `pragma solidity 0.8.20`, try to use it."""
     match = re.search(r"pragma\s+solidity\s+[^;]*?(\d+\.\d+\.\d+)", source_code)
-    if not match:
-        return
-    version = match.group(1)
+    version = match.group(1) if match else DEFAULT_SOLC
     try:
         subprocess.run(
             ["solc-select", "use", version, "--always-install"],
@@ -123,6 +121,33 @@ def _try_set_solc_version(source_code: str) -> None:
         )
     except Exception as exc:
         logger.warning("solc-select failed for %s: %s", version, exc)
+
+
+def _short_error(text: str, limit: int = 240) -> str:
+    if not text:
+        return "Slither/solc failed"
+    # Prefer the last meaningful line (often InvalidCompilation / CompilerError)
+    lines = [ln.strip() for ln in text.replace("\r", "").split("\n") if ln.strip()]
+    interesting = [
+        ln
+        for ln in lines
+        if any(
+            k in ln
+            for k in (
+                "InvalidCompilation",
+                "CompilerError",
+                "ParserError",
+                "solc",
+                "Error:",
+                "error:",
+            )
+        )
+    ]
+    pick = interesting[-1] if interesting else (lines[-1] if lines else text)
+    pick = re.sub(r"\s+", " ", pick)
+    if len(pick) > limit:
+        pick = pick[: limit - 3] + "..."
+    return pick
 
 
 def _normalize_detectors(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -150,15 +175,12 @@ def _normalize_detectors(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "impact": d.get("impact"),
                 "confidence": d.get("confidence"),
                 "description": description,
-                "markdown_element": d.get("markdown_element"),
-                "first_markdown_element": d.get("first_markdown_element"),
                 "file": first_file,
                 "lines": sorted(set(lines)),
                 "elements": [
                     {
                         "name": el.get("name"),
                         "type": el.get("type"),
-                        "source_mapping": el.get("source_mapping"),
                     }
                     for el in elements
                 ],
@@ -169,7 +191,6 @@ def _normalize_detectors(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def filter_findings(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Drop style noise; keep high/medium impact and priority security checks."""
     kept: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -202,43 +223,20 @@ def format_slither_for_prompt(findings: List[Dict[str, Any]]) -> str:
     lines = ["Slither static analysis (filtered high/medium detectors):"]
     for i, f in enumerate(findings, 1):
         lines_info = f.get("lines") or []
-        els = []
-        for el in f.get("elements") or []:
-            name = el.get("name") or el.get("type") or ""
-            if name:
-                els.append(str(name))
-        if lines_info:
-            loc = f"lines {lines_info[0]}-{lines_info[-1]}"
-        else:
-            loc = ", ".join(els[:4]) if els else "n/a"
+        loc = (
+            f"lines {lines_info[0]}-{lines_info[-1]}"
+            if lines_info
+            else "n/a"
+        )
         lines.append(
-            f"{i}. [{f.get('impact')}] {f.get('check')} — {f.get('description')} "
-            f"({loc})"
+            f"{i}. [{f.get('impact')}] {f.get('check')} — {f.get('description')} ({loc})"
         )
     return "\n".join(lines)
 
 
-# ------------------------------------------------------------------
-# Core Runner
-# ------------------------------------------------------------------
 def run_slither(
     source_code: str, contract_name: str = "Contract.sol"
 ) -> Optional[Dict[str, Any]]:
-    """Run Slither on source code string.
-
-    Returns:
-        {
-          "success": bool,
-          "detectors": [normalized findings],
-          "filtered_detectors": [noise-filtered subset for Muse],
-          "detector_checks": ["reentrancy-eth", ...],
-          "count": int,
-          "filtered_count": int,
-          "raw": {...} | None,
-          "error": str | None
-        }
-    Returns None only if Slither is not installed / disabled.
-    """
     if not source_code or not source_code.strip():
         return {
             "success": False,
@@ -255,6 +253,7 @@ def run_slither(
         logger.warning("Slither not available in this environment")
         return None
 
+    source_code = _normalize_pragma(source_code)
     _try_set_solc_version(source_code)
 
     with tempfile.TemporaryDirectory(prefix="sentryvision_") as tmp:
@@ -295,8 +294,8 @@ def run_slither(
                 "error": str(exc),
             }
 
-        # Slither exits non-zero when findings exist — JSON file is source of truth.
         if not out_file.exists():
+            raw_err = (proc.stderr or proc.stdout or "Slither produced no JSON output")
             return {
                 "success": False,
                 "detectors": [],
@@ -305,9 +304,7 @@ def run_slither(
                 "count": 0,
                 "filtered_count": 0,
                 "raw": None,
-                "error": (proc.stderr or proc.stdout or "Slither produced no JSON output")[
-                    :2000
-                ],
+                "error": _short_error(raw_err),
             }
 
         try:
@@ -333,7 +330,7 @@ def run_slither(
                 "count": 0,
                 "filtered_count": 0,
                 "raw": raw,
-                "error": str(raw.get("error"))[:2000],
+                "error": _short_error(str(raw.get("error") or "Compilation failed")),
             }
 
         detectors = _normalize_detectors(raw)
@@ -355,19 +352,14 @@ def run_slither(
 def run_slither_on_code(
     source_code: str, contract_name: str = "Contract.sol"
 ) -> Optional[Dict[str, Any]]:
-    """Backwards-compatible alias."""
     return run_slither(source_code, contract_name)
 
 
-# ------------------------------------------------------------------
-# Verified Patches (F3)
-# ------------------------------------------------------------------
 def verify_patch(
     patched_code: str,
     target_checks: Optional[List[str]] = None,
     contract_name: str = "Patched.sol",
 ) -> Dict[str, Any]:
-    """Re-analyze a Muse-proposed patch with Slither."""
     if not patched_code or not patched_code.strip():
         return {
             "patch_verified": False,
@@ -393,7 +385,8 @@ def verify_patch(
             "patch_verified": False,
             "patch_verification_status": "failed",
             "patch_verification_details": (
-                f"Slither could not verify patch: {result['error']}"
+                "Could not compile/verify patch with Slither: "
+                + (result.get("error") or "unknown error")
             ),
             "remaining_checks": [],
         }
