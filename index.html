@@ -158,6 +158,12 @@
       line-height: 1.5;
       font-size: 0.94rem;
     }
+    .summary-meta {
+      margin-top: 10px;
+      color: #7b8b9e;
+      font-size: 0.8rem;
+      letter-spacing: 0.01em;
+    }
 
     .finding {
       background: var(--panel);
@@ -317,6 +323,7 @@
       <div class="summary">
         <h2>Audit Summary</h2>
         <p id="summaryText"></p>
+        <p id="summaryMeta" class="summary-meta"></p>
       </div>
       <div id="findings"></div>
     </section>
@@ -364,14 +371,13 @@
 
     function loadSample(key) {
       inputEl.value = SAMPLES[key] || '';
-      inputEl.scrollTop = 0; // <-- critical on mobile
+      inputEl.scrollTop = 0;
       setActiveSample(key);
       saveInput();
       clearStatus();
       document.getElementById('results').style.display = 'none';
     }
 
-    // DEMO MODE: always start fresh, never restore stale code
     try { sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
     loadSample('reentrancy');
 
@@ -404,7 +410,6 @@
       return 'badge-info';
     }
 
-    /** If the user pastes an API JSON body, pull out solidity_code. */
     function normalizeCode(raw) {
       const text = (raw || '').trim();
       if (!text) return '';
@@ -512,7 +517,6 @@
         card.appendChild(row);
       });
 
-      // F3 — Verified Patches
       const hasPatch = typeof finding.patched_code === 'string' && finding.patched_code.trim().length > 0;
       const status = finding.patch_verification_status || 'not_checked';
       if (hasPatch || status !== 'not_checked') {
@@ -584,8 +588,34 @@
       }
     }
 
+    let progressTimer = null;
+
+    function stopProgressStatus() {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+    }
+
+    function startProgressStatus() {
+      stopProgressStatus();
+      const stages = [
+        'F1 · Running Slither static analysis…',
+        'F2 · Muse Spark is triaging findings…',
+        'F3 · Verifying proposed patches with Slither…'
+      ];
+      let i = 0;
+      showStatus('loading', stages[0]);
+      progressTimer = setInterval(function () {
+        i = Math.min(i + 1, stages.length - 1);
+        showStatus('loading', stages[i]);
+        if (i >= stages.length - 1) {
+          stopProgressStatus();
+        }
+      }, 9000);
+    }
+
     async function analyzeContract() {
-      // Keep whatever the user typed; only normalize JSON wrappers.
       let code = normalizeCode(inputEl.value);
       if (code !== inputEl.value) {
         inputEl.value = code;
@@ -596,6 +626,7 @@
       const results = document.getElementById('results');
       const findingsEl = document.getElementById('findings');
       const summaryText = document.getElementById('summaryText');
+      const summaryMeta = document.getElementById('summaryMeta');
 
       if (!code.trim()) {
         showStatus('error', 'Please paste some Solidity code first.');
@@ -604,10 +635,11 @@
 
       btn.disabled = true;
       clearStatus();
-      showStatus('loading', 'AI is analyzing the contract…');
+      startProgressStatus();
       results.style.display = 'none';
       findingsEl.innerHTML = '';
       summaryText.textContent = '';
+      if (summaryMeta) summaryMeta.textContent = '';
 
       try {
         const response = await fetch(getBackendUrl(), {
@@ -634,6 +666,26 @@
           ? data.summary
           : 'No summary provided.';
 
+        const meta = data.meta || {};
+        const slitherN = typeof meta.slither_findings_count === 'number'
+          ? meta.slither_findings_count
+          : 0;
+        const verifiedN = typeof meta.patches_verified_count === 'number'
+          ? meta.patches_verified_count
+          : findings.filter(function (f) { return f && f.patch_verified; }).length;
+        const proposedN = typeof meta.patches_proposed_count === 'number'
+          ? meta.patches_proposed_count
+          : findings.filter(function (f) {
+              return f && typeof f.patched_code === 'string' && f.patched_code.trim();
+            }).length;
+        if (summaryMeta) {
+          summaryMeta.textContent =
+            'Slither findings: ' + slitherN +
+            ' · Patches proposed: ' + proposedN +
+            ' · Patches verified: ' + verifiedN +
+            ' · Pipeline: F1 Slither → F2 Muse → F3 verify';
+        }
+
         if (findings.length === 0) {
           const empty = document.createElement('div');
           empty.className = 'empty';
@@ -647,9 +699,11 @@
           }
         }
 
+        stopProgressStatus();
         clearStatus();
         results.style.display = 'block';
       } catch (err) {
+        stopProgressStatus();
         showStatus('error', err.message || 'Something went wrong.');
         console.error(err);
       } finally {
