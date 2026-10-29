@@ -7,38 +7,24 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
     :root {
-      --bg: #0b0f14;
-      --panel: #121821;
-      --panel-2: #18212b;
-      --border: #243041;
-      --text: #e8eef6;
-      --muted: #9aa8b8;
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --cyan: #22d3ee;
-      --critical: #f87171;
-      --high: #fb923c;
-      --medium: #fbbf24;
-      --low: #38bdf8;
-      --info: #94a3b8;
+      --bg: #0b0f14; --panel: #121821; --panel-2: #18212b; --border: #243041;
+      --text: #e8eef6; --muted: #9aa8b8; --accent: #3b82f6; --accent-hover: #2563eb;
+      --cyan: #22d3ee; --critical: #f87171; --high: #fb923c; --medium: #fbbf24;
+      --low: #38bdf8; --info: #94a3b8;
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       background: radial-gradient(1200px 600px at 20% -10%, #132033 0%, var(--bg) 55%);
-      color: var(--text);
-      min-height: 100vh;
+      color: var(--text); min-height: 100vh;
     }
     .wrap { max-width: 960px; margin: 0 auto; padding: 28px 18px 60px; }
     header { margin-bottom: 22px; }
     header h1 { margin: 0 0 6px; font-size: 1.7rem; letter-spacing: -0.02em; }
     header p { margin: 0; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
     header p.pipeline {
-      margin-top: 10px; padding: 10px 12px;
-      background: rgba(34, 211, 238, 0.06);
-      border: 1px solid rgba(34, 211, 238, 0.18);
-      border-radius: 10px; font-size: 0.86rem; color: #b7c6d6;
+      margin-top: 10px; padding: 10px 12px; background: rgba(34, 211, 238, 0.06);
+      border: 1px solid rgba(34, 211, 238, 0.18); border-radius: 10px; font-size: 0.86rem; color: #b7c6d6;
       overflow-wrap: normal; word-break: normal; hyphens: none;
     }
     header p.pipeline strong { color: var(--cyan); font-weight: 700; }
@@ -117,7 +103,7 @@
         <button type="button" data-sample="unchecked" onclick="loadSample('unchecked')">Unchecked Call</button>
       </div>
       <p class="input-hint">Paste a Solidity contract to get plain-language findings and visual exploit flows.</p>
-      <textarea id="solidityInput" placeholder="Paste Solidity only (not a JSON wrapper). Example:&#10;&#10;pragma solidity ^0.8.0;&#10;&#10;contract YourContract { ... }"></textarea>
+      <textarea id="solidityInput" placeholder="Paste Solidity only (not a JSON wrapper)."></textarea>
       <button type="button" id="analyzeBtn" class="primary-btn" onclick="analyzeContract()">Run Meta-assisted Audit</button>
       <div id="status" class="status"></div>
     </section>
@@ -322,8 +308,23 @@
         const slitherN = typeof meta.slither_findings_count === 'number' ? meta.slither_findings_count : 0;
         const verifiedN = typeof meta.patches_verified_count === 'number' ? meta.patches_verified_count : findings.filter(function (f) { return f && f.patch_verified; }).length;
         const proposedN = typeof meta.patches_proposed_count === 'number' ? meta.patches_proposed_count : findings.filter(function (f) { return f && typeof f.patched_code === 'string' && f.patched_code.trim(); }).length;
+        const failedN = typeof meta.patches_failed_count === 'number'
+          ? meta.patches_failed_count
+          : findings.filter(function (f) { return f && f.patch_verification_status === 'failed'; }).length;
+        const pipelineLabel = typeof meta.pipeline_label === 'string' && meta.pipeline_label
+          ? meta.pipeline_label
+          : (meta.slither_error
+              ? 'F2 only (static analysis unavailable)'
+              : 'F1 Sli ther → F2 Muse → F3 verify');
         if (summaryMeta) {
-          summaryMeta.textContent = 'Slither findings: ' + slitherN + ' · Patches proposed: ' + proposedN + ' · Patches verified: ' + verifiedN + ' · Pipeline: F1 Slither → F2 Muse → F3 verify';
+          let line =
+            'Slither findings: ' + slitherN +
+            ' · Patches proposed: ' + proposedN +
+            ' · Patches verified: ' + verifiedN;
+          if (failedN > 0) line += ' · Patches failed: ' + failedN;
+          line += ' · Pipeline: ' + pipelineLabel;
+          if (meta.slither_error) line += ' (' + String(meta.slither_error).slice(0, 80) + ')';
+          summaryMeta.textContent = line;
         }
         if (findings.length === 0) {
           const empty = document.createElement('div'); empty.className = 'empty';
