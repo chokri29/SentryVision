@@ -45,7 +45,7 @@ REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
 # Cap how many Muse patches we re-verify (each is a full Slither run).
-MAX_PATCH_VERIFICATIONS = int(os.getenv("MAX_PATCH_VERIFICATIONS", "2"))
+MAX_PATCH_VERIFICATIONS = int(os.getenv("MAX_PATCH_VERIFICATIONS", "3"))
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -197,7 +197,7 @@ def verify_patches(findings: list[Finding]) -> list[Finding]:
             f.patch_verified = False
             f.patch_verification_status = "not_checked"
             f.patch_verification_details = (
-                "Patch is a code snippet, not a full contract. Slither verification skipped."
+                "Patch is a code snippet, not a full contract. Sli ther verification skipped."
             )
             continue
 
@@ -222,7 +222,6 @@ def verify_patches(findings: list[Finding]) -> list[Finding]:
         f.patch_verified = result.get("patch_verified", False)
         f.patch_verification_status = result.get("patch_verification_status", "failed")
         details = result.get("patch_verification_details") or ""
-        # Never surface raw Python tracebacks in the UI
         if "Traceback" in details or len(details) > 280:
             details = details.split("Traceback")[0].strip() or (
                 "Could not compile/verify patch with Slither (solc error)."
@@ -291,12 +290,7 @@ USER_TEMPLATE = (
     "<contract>\n{code}\n</contract>"
 )
 
-REPAIR_TEMPLATE = """Your previous output failed JSON schema validation.
-
-Error: {error}
-Previous output: {bad_output}
-
-Return ONLY the corrected valid JSON matching the exact schema from the system prompt. No markdown, no reasoning, no explanation."""
+REPAIR_TEMPLATE = """Your previous output failed JSON schema validation.\n\nError: {error}\nPrevious output: {bad_output}\n\nReturn ONLY the corrected valid JSON matching the exact schema from the system prompt. No markdown, no reasoning, no explanation."""
 
 
 @app.get("/")
@@ -395,6 +389,15 @@ def analyze_contract(request: Request, payload: AuditRequest):
                     "slither_enabled": ENABLE_SLITHER,
                     "slither_findings_count": len(slither_findings),
                     "slither_error": slither_error,
+                    "patches_verified_count": sum(
+                        1 for f in findings if getattr(f, "patch_verified", False)
+                    ),
+                    "patches_proposed_count": sum(
+                        1
+                        for f in findings
+                        if getattr(f, "patched_code", None)
+                        and str(getattr(f, "patched_code")).strip()
+                    ),
                 },
             )
 
