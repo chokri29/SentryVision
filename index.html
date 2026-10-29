@@ -293,7 +293,20 @@
       font-size: 0.88rem;
       line-height: 1.45;
     }
+    .patch-code-wrap { margin-top: 4px; }
+    .patch-toggle {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: #b7c6d6;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .patch-toggle:hover { border-color: var(--accent); color: #fff; }
     .patch-code {
+      display: none;
       width: 100%;
       max-height: 220px;
       overflow: auto;
@@ -307,6 +320,7 @@
       line-height: 1.4;
       white-space: pre;
     }
+    .patch-code.open { display: block; }
 
     footer {
       margin-top: 18px;
@@ -321,7 +335,7 @@
     <header>
       <h1>🛡️ SentryVision</h1>
       <p>Meta AI-assisted pre-audit triage for developers and non-technical founders (Meta's Muse Spark Open).</p>
-      <p class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains &amp; proposes a fix → <strong>F3 Slither</strong> re-checks the patch. Green <em>Patch verified by Slither</em> means the fix was re-analyzed deterministically.</p>
+      <p class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains &amp; proposes a fix → <strong>F3 Sli ther</strong> re-checks the patch. Green <em>Patch verified by Slither</em> means the fix was re-analyzed deterministically.</p>
     </header>
 
     <section class="panel">
@@ -358,31 +372,15 @@
     const STORAGE_KEY = 'sentryvision_solidity_input_v3';
 
     const SAMPLES = {
-      // Matches examples/01_reentrancy.sol
       reentrancy: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\n/// Classic reentrancy: external call before state update\ncontract VulnerableBank {\n    mapping(address => uint256) public balances;\n\n    function deposit() external payable {\n        balances[msg.sender] += msg.value;\n    }\n\n    function withdraw(uint256 amount) external {\n        require(balances[msg.sender] >= amount, "Insufficient balance");\n        (bool success, ) = msg.sender.call{value: amount}("");\n        require(success, "Transfer failed");\n        balances[msg.sender] -= amount;\n    }\n}`,
-      // Matches examples/02_missing_access_control.sol
       access: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\n/// Sensitive admin function with no access control\ncontract OpenVault {\n    address public owner;\n    mapping(address => uint256) public deposits;\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    function deposit() external payable {\n        deposits[msg.sender] += msg.value;\n    }\n\n    function emergencyWithdraw(address to, uint256 amount) external {\n        (bool ok, ) = to.call{value: amount}("");\n        require(ok, "transfer failed");\n    }\n}`,
-      // Matches examples/03_unchecked_call.sol
       unchecked: `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\n/// External call without checking success; state updated afterward\ncontract Payout {\n    mapping(address => uint256) public owed;\n\n    function setOwed(address user, uint256 amount) external {\n        owed[user] = amount;\n    }\n\n    function claim() external {\n        uint256 amount = owed[msg.sender];\n        msg.sender.call{value: amount}("");\n        owed[msg.sender] = 0;\n    }\n}`
     };
 
     const inputEl = document.getElementById('solidityInput');
 
     function saveInput() {
-      try {
-        sessionStorage.setItem(STORAGE_KEY, inputEl.value);
-      } catch (_) {}
-    }
-
-    function restoreInput() {
-      try {
-        const saved = sessionStorage.getItem(STORAGE_KEY);
-        if (saved && saved.trim()) {
-          inputEl.value = saved;
-          return true;
-        }
-      } catch (_) {}
-      return false;
+      try { sessionStorage.setItem(STORAGE_KEY, inputEl.value); } catch (_) {}
     }
 
     function setActiveSample(key) {
@@ -402,7 +400,6 @@
 
     try { sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
     loadSample('reentrancy');
-
     inputEl.addEventListener('input', saveInput);
 
     function getBackendUrl() {
@@ -438,9 +435,7 @@
       if (text.charAt(0) !== '{') return text;
       try {
         const obj = JSON.parse(text);
-        if (obj && typeof obj.solidity_code === 'string') {
-          return obj.solidity_code;
-        }
+        if (obj && typeof obj.solidity_code === 'string') return obj.solidity_code;
       } catch (_) {}
       return text;
     }
@@ -449,7 +444,6 @@
       if (typeof raw !== 'string' || !raw.trim()) {
         return 'graph TD\nA[Attacker] --> B[Contract]\nB --> C[Exploit]';
       }
-
       let cleaned = raw
         .replace(/```(?:mermaid)?/gi, '')
         .replace(/```/g, '')
@@ -459,7 +453,6 @@
         .replace(/\\n/g, '\n')
         .replace(/\r/g, '\n')
         .trim();
-
       cleaned = cleaned.replace(/\[([^\]]*)\]/g, function (_, label) {
         const safe = String(label)
           .replace(/[(){}\[\]"'`<>:;]/g, ' ')
@@ -469,22 +462,14 @@
           .slice(0, 40) || 'step';
         return '[' + safe + ']';
       });
-
-      const lines = cleaned
-        .split('\n')
-        .map(function (line) { return line.trim(); })
-        .filter(function (line) { return line.length > 0; });
-
+      const lines = cleaned.split('\n').map(function (line) { return line.trim(); }).filter(Boolean);
       cleaned = lines.join('\n');
-
       if (!/^(graph|flowchart)\s+(TD|TB|LR|RL)/i.test(cleaned)) {
         cleaned = 'graph TD\n' + cleaned;
       }
-
       if (cleaned.length < 12) {
         return 'graph TD\nA[Attacker] --> B[Vulnerable contract]\nB --> C[Exploit step]';
       }
-
       return cleaned;
     }
 
@@ -569,20 +554,26 @@
         }
 
         if (hasPatch) {
-          const label = document.createElement('strong');
-          label.textContent = 'Proposed patch';
-          label.style.display = 'block';
-          label.style.fontSize = '0.78rem';
-          label.style.color = '#b7c6d6';
-          label.style.marginBottom = '6px';
-          label.style.textTransform = 'uppercase';
-          label.style.letterSpacing = '0.04em';
-          patchRow.appendChild(label);
+          const wrap = document.createElement('div');
+          wrap.className = 'patch-code-wrap';
+
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'patch-toggle';
+          toggle.textContent = 'Show proposed patch';
 
           const pre = document.createElement('pre');
           pre.className = 'patch-code';
           pre.textContent = finding.patched_code;
-          patchRow.appendChild(pre);
+
+          toggle.addEventListener('click', function () {
+            const open = pre.classList.toggle('open');
+            toggle.textContent = open ? 'Hide proposed patch' : 'Show proposed patch';
+          });
+
+          wrap.appendChild(toggle);
+          wrap.appendChild(pre);
+          patchRow.appendChild(wrap);
         }
 
         card.appendChild(patchRow);
@@ -631,17 +622,13 @@
       progressTimer = setInterval(function () {
         i = Math.min(i + 1, stages.length - 1);
         showStatus('loading', stages[i]);
-        if (i >= stages.length - 1) {
-          stopProgressStatus();
-        }
+        if (i >= stages.length - 1) stopProgressStatus();
       }, 9000);
     }
 
     async function analyzeContract() {
       let code = normalizeCode(inputEl.value);
-      if (code !== inputEl.value) {
-        inputEl.value = code;
-      }
+      if (code !== inputEl.value) inputEl.value = code;
       saveInput();
 
       const btn = document.getElementById('analyzeBtn');
@@ -689,9 +676,7 @@
           : 'No summary provided.';
 
         const meta = data.meta || {};
-        const slitherN = typeof meta.slither_findings_count === 'number'
-          ? meta.slither_findings_count
-          : 0;
+        const slitherN = typeof meta.slither_findings_count === 'number' ? meta.slither_findings_count : 0;
         const verifiedN = typeof meta.patches_verified_count === 'number'
           ? meta.patches_verified_count
           : findings.filter(function (f) { return f && f.patch_verified; }).length;
