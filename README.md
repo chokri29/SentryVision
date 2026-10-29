@@ -187,7 +187,7 @@ Everything in this repository is being built during the hackathon window. An ear
 | F3 patch proposal + Slither re-verification | Done |
 | Sample contracts aligned with UI buttons | Done |
 | Live deploy on Render | Done |
-| Improvements | and Refining | Planned |
+| Improvements and Refining | Planned |
 | Testing Accuracy and outputs Validation | Planned |
 
 The commit history shows when each piece was built.
