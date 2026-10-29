@@ -8,7 +8,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 ---
 
-## Why not just Slither, or just an LLM?
+## Why not just Sli ther, or just an LLM?
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
@@ -20,7 +20,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 Developers and non-technical founders usually get one of two things:
 
-- **Dense static-analysis dumps** (for example raw Sli ther output) that they cannot interpret, or
+- **Dense static-analysis dumps** (for example raw Slither output) that they cannot interpret, or
 - **Generic LLM answers** with no deterministic grounding that they cannot trust.
 
 Neither tells them *what is actually dangerous* or *how an attack would really happen*.
@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
 ```
 
