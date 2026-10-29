@@ -31,7 +31,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 2. **Slither** runs deterministic static detection (detector, impact, confidence, affected lines).
 3. **Muse Spark Open** (Meta's open-weights model) triages the findings: confirms real issues, ranks by exploitability, and explains each issue in plain language.
 4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid) for each confirmed finding.
-5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Slither" or "Unverified patch".
+5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Sli ther" or "Unverified patch".
 
 **Core differentiation:** not just "find bugs", but *show how the hack would actually happen*, and check the fix with the same deterministic tool.
 
@@ -43,7 +43,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | --- | --- | --- |
 | **F1** | Deterministic static signal | Slither |
 | **F2** | Triage, plain-language explanation, patch proposal, Mermaid exploit flow | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
-| **F3** | Patch re-verification (Slither re-check) | Sli ther on proposed `patched_code` |
+| **F3** | Patch re-verification (Slither re-check) | Slither on proposed `patched_code` |
 
 ```mermaid
 flowchart TD
@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
 ```
 
@@ -151,7 +151,7 @@ uvicorn main:app --reload --port 8000
 | Summary meta line | `Slither findings: N · Patches verified: M · Pipeline: F1 → F2 → F3` |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
 | Mermaid flowchart | Visual exploit path (presentation layer) |
-| **Patch verified by Slither** (green) | F3: Slither no longer reports High/Medium on that patch (not a full audit) |
+| **Patch verified by Slither** (green) | F3: Sli ther no longer reports High/Medium on that patch (not a full audit) |
 | **Fix proposed** | Muse returned a full patched contract |
 
 Optional: try **examples/02 · Access Control** and **examples/03 · Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
