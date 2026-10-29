@@ -31,7 +31,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 2. **Slither** runs deterministic static detection (detector, impact, confidence, affected lines).
 3. **Muse Spark Open** (Meta's open-weights model) triages the findings: confirms real issues, ranks by exploitability, and explains each issue in plain language.
 4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid) for each confirmed finding.
-5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Slither" or "Unverified patch".
+5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Sli ther" or "Unverified patch".
 
 **Core differentiation:** not just "find bugs", but *show how the hack would actually happen*, and check the fix with the same deterministic tool.
 
@@ -191,7 +191,7 @@ Everything in this repository is being built during the hackathon window. An ear
 | UI: finding cards, severity badges, Mermaid flows | Done |
 | F1 Slither (Docker image + `solc-select`) | Done |
 | F2 Muse triage, plain language, patch proposal | Done |
-| F3 Slither re-verification on proposed patches | Done |
+| F3 Sli ther re-verification on proposed patches | Done |
 | Sample contracts (UI buttons + `examples/*.sol`) | Done |
 | Live deploy on Render (Docker) | Done |
 | Collapsible patches, F3 skip when no patch | Done |
