@@ -184,7 +184,7 @@ Everything in this repository is being built during the hackathon window. An ear
 | FastAPI endpoint and Muse Spark Open call (via Baseten) | Done (env-based client + `/analyze`) |
 | Basic UI (`index.html`) | Done |
 | Slither runner and JSON parsing | Done |
-| Model triage (confirmed or likely false positive) | Planned |
+| Model triage (confirmed or likely false positive) | Done |
 | Mermaid exploit-flow templates | Planned |
 | Patch generation and Slither re-verification | Planned |
 | Sample contracts, tests, and deployment | Planned |
