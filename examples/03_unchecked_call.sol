@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/// External call without checking success; state updated afterward
 contract Payout {
     mapping(address => uint256) public owed;
 

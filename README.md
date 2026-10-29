@@ -20,7 +20,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 Developers and non-technical founders usually get one of two things:
 
-- **Dense static-analysis dumps** (for example raw Slither output) that they cannot interpret, or
+- **Dense static-analysis dumps** (for example raw Sli ther output) that they cannot interpret, or
 - **Generic LLM answers** with no deterministic grounding that they cannot trust.
 
 Neither tells them *what is actually dangerous* or *how an attack would really happen*.
@@ -42,8 +42,8 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | Layer | Role | Engine |
 | --- | --- | --- |
 | **F1** | Deterministic static signal | Slither |
-| **F2** | Triage, plain-language explanation, patch proposal | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
-| **F3** | Patch re-verification + visual exploit path | Slither re-check + Mermaid.js |
+| **F2** | Triage, plain-language explanation, patch proposal, Mermaid exploit flow | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
+| **F3** | Patch re-verification (Slither re-check) | Slither on proposed `patched_code` |
 
 ```mermaid
 flowchart TD
@@ -51,9 +51,8 @@ flowchart TD
     B --> C["Slither JSON findings"]
     C --> D["F2: Muse Spark Open triage"]
     A --> D
-    D --> E["Structured JSON findings"]
-    E --> F["Mermaid exploit-flow diagrams"]
-    F --> G["Finding cards and attack flowchart"]
+    D --> E["Structured JSON findings + Mermaid flows"]
+    E --> G["Finding cards"]
     D --> H["Patch proposal"]
     H --> I["F3: Slither re-verification"]
     I --> G
@@ -63,12 +62,11 @@ flowchart TD
 
 **F1 - Deterministic Detection:** Slither static analysis on the submitted `.sol` contract produces structured JSON findings.
 
-**F2 - Muse Spark Open Triage:** Meta Muse Spark Open reads both the contract and Slither findings and returns structured JSON findings plus a patch proposal.
+**F2 - Muse Spark Open Triage:** Meta Muse Spark Open reads both the contract and Slither findings and returns structured JSON findings, plain-language explanations, Mermaid exploit-flow diagrams, and optional patch proposals.
 
-**F3 - Presentation & Verification:**
-- Finding cards with severity, plain language, and Mermaid exploit flows
-- Reasoning-aware parsing with Pydantic validation and one repair retry
-- Verified patches: proposed fixes are re-analyzed by Slither before they are labeled verified
+**F3 - Patch verification:** proposed fixes are re-analyzed by Slither before they are labeled verified.
+
+**Presentation (alongside the pipeline):** finding cards with severity, plain language, and Mermaid diagrams. Reasoning-aware parsing validates Muse JSON with Pydantic and one repair retry.
 
 ---
 
@@ -144,7 +142,7 @@ uvicorn main:app --reload --port 8000
 
 1. Open the live app (or `http://localhost:8000` after Docker/local start).
 2. Click **examples/01 · Reentrancy** (same source as [`examples/01_reentrancy.sol`](examples/01_reentrancy.sol)).
-3. Click **Run AI Audit**.
+3. Click **Run Meta-assisted Audit**.
 
 **What to look for**
 
@@ -152,8 +150,8 @@ uvicorn main:app --reload --port 8000
 | --- | --- |
 | Summary meta line | `Slither findings: N · Patches verified: M · Pipeline: F1 → F2 → F3` |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
-| Mermaid flowchart | Visual exploit path for non-technical founders |
-| **Patch verified by Slither** (green) | F3 re-ran Slither on the proposed fix — deterministic check |
+| Mermaid flowchart | Visual exploit path (presentation layer) |
+| **Patch verified by Slither** (green) | F3: Slither no longer reports High/Medium on that patch (not a full audit) |
 | **Fix proposed** | Muse returned a full patched contract |
 
 Optional: try **examples/02 · Access Control** and **examples/03 · Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
@@ -170,7 +168,7 @@ Optional: try **examples/02 · Access Control** and **examples/03 · Unchecked C
 | [`04_tx_origin_auth.sol`](examples/04_tx_origin_auth.sol) | — | `tx.origin` authentication |
 | [`05_safe_minimal.sol`](examples/05_safe_minimal.sol) | — | Ideally no Critical/High findings |
 
-These contracts are self-contained (no OpenZeppelin imports) so Slither can run in the Docker image. They are **demo / triage fixtures**, not formal audit ground truth.
+These contracts are self-contained (no OpenZeppelin imports) so Slither can run in the Docker image. They are **demo / triage fixtures**, not formal audit ground truth. Sample source in the UI matches these files and does **not** include comments that name the vulnerability.
 
 ---
 
@@ -187,8 +185,7 @@ Everything in this repository is being built during the hackathon window. An ear
 | F3 patch proposal + Slither re-verification | Done |
 | Sample contracts aligned with UI buttons | Done |
 | Live deploy on Render | Done |
-| Improvements and Refining | Planned |
-| Testing Accuracy and outputs Validation | Planned |
+| Demo video | Planned |
 
 The commit history shows when each piece was built.
 
@@ -198,7 +195,7 @@ The commit history shows when each piece was built.
 
 - This is **not a formal audit** and gives no guarantee that a contract is safe.
 - Slither can produce false positives, and no static analyzer finds every bug. The model can also be wrong.
-- A patch marked "verified by Slither" only means Slither no longer reports High/Medium findings on that patch, not that the contract is secure.
+- A patch marked "verified by Slither" only means Slither no longer reports High/Medium findings on that patch — not that the original issue is fully gone in every sense, and not that the contract is secure overall.
 - Contracts that depend on external imports may not compile when pasted as a single file.
 - Always have important contracts reviewed by a professional auditor before deployment.
 
