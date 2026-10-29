@@ -187,7 +187,6 @@ def format_slither_for_prompt(detectors: list) -> str:
 
 def verify_patches(findings: list[Finding]) -> list[Finding]:
     """F3 — only run Slither on full proposed patches (skip when Muse returned none)."""
-    # Fast path: no proposed patches at all → zero Slither work
     has_any_patch = any((f.patched_code or "").strip() for f in findings)
     if not has_any_patch:
         for f in findings:
@@ -399,6 +398,12 @@ def analyze_contract(request: Request, payload: AuditRequest):
                     "slither_enabled": ENABLE_SLITHER,
                     "slither_findings_count": len(slither_findings),
                     "slither_error": slither_error,
+                    "f1_ran": slither_error is None,
+                    "pipeline_label": (
+                        "F1 Slither → F2 Muse → F3 verify"
+                        if slither_error is None
+                        else "F2 only (static analysis unavailable)"
+                    ),
                     "patches_verified_count": sum(
                         1 for f in findings if getattr(f, "patch_verified", False)
                     ),
@@ -407,6 +412,11 @@ def analyze_contract(request: Request, payload: AuditRequest):
                         for f in findings
                         if getattr(f, "patched_code", None)
                         and str(getattr(f, "patched_code")).strip()
+                    ),
+                    "patches_failed_count": sum(
+                        1
+                        for f in findings
+                        if getattr(f, "patch_verification_status", None) == "failed"
                     ),
                 },
             )

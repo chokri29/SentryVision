@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
 ```
 
@@ -67,6 +67,8 @@ flowchart TD
 **F3 - Patch verification:** proposed fixes are re-analyzed by Slither before they are labeled verified.
 
 **Presentation (alongside the pipeline):** finding cards with severity, plain language, and Mermaid diagrams. Reasoning-aware parsing validates Muse JSON with Pydantic and one repair retry.
+
+When F1 cannot run (compile failure, Slither unavailable, or Slither disabled), the UI meta line reports **Pipeline: F2 only (static analysis unavailable)** instead of implying a full F1 → F2 → F3 path.
 
 ---
 
@@ -148,13 +150,20 @@ uvicorn main:app --reload --port 8000
 
 | UI signal | Meaning |
 | --- | --- |
-| Summary meta line | `Slither findings: N · Patches verified: M · Pipeline: F1 → F2 → F3` |
+| Summary meta line | Counts + pipeline label (`F1 → F2 → F3`, or `F2 only` if Slither could not run) |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
 | Mermaid flowchart | Visual exploit path (presentation layer) |
-| **Patch verified by Slither** (green) | F3: Slither no longer reports High/Medium on that patch (not a full audit) |
+| **Patch verified by Slither** (green) | F3: Sli ther no longer reports High/Medium on that patch (not a full audit) |
+| **Patch failed Slither re-check** | F3 rejected the proposed fix — verification can say no |
 | **Fix proposed** | Muse returned a full patched contract |
 
 Optional: try **Access Control** and **Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
+
+### Verification can say no
+
+F3 is not a rubber stamp. If Muse proposes a weak or incomplete fix, Slither can still report High/Medium findings on the patched code. In that case the UI shows **Patch failed Slither re-check** (not the green verified badge).
+
+That failure path matters: it proves the badge is earned by a second deterministic scan, not by trusting the model alone.
 
 ---
 
@@ -186,6 +195,7 @@ Everything in this repository is being built during the hackathon window. An ear
 | Sample contracts (UI buttons + `examples/*.sol`) | Done |
 | Live deploy on Render (Docker) | Done |
 | Collapsible patches, F3 skip when no patch | Done |
+| Honest pipeline label when F1 unavailable | Done |
 | Demo video | Planned |
 
 The commit history shows when each piece was built.
