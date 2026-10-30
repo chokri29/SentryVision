@@ -2,7 +2,7 @@
 
 **SentryVision is a standalone smart contract security verifier built for the Meta Hackathon. It analyzes Solidity contracts, identifies vulnerabilities, explains how an exploit would actually happen, and visualizes the attack flow.**
 
-Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta's Muse Spark Open reasoning to produce structured, auditable, and visual security intelligence.
+Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta's Muse Spark Open (and optional Muse Wonder on repair) to produce structured, auditable, and visual security intelligence.
 
 > Sentry Vision is a triage and visualization tool, **not** a formal security audit. See [Limitations](#limitations).
 
@@ -12,7 +12,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
-- **Sentry Vision combines them:** Slither detects, a Meta model interprets and visualizes, and Slither verifies the fix.
+- **Sentry Vision combines them:** Slither detects, Muse Spark Open interprets and visualizes, Slither verifies the fix, and optional Muse Wonder retries a rejected patch once.
 
 ---
 
@@ -20,7 +20,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 Developers and non-technical founders usually get one of two things:
 
-- **Dense static-analysis dumps** (for example raw Sli ther output) that they cannot interpret, or
+- **Dense static-analysis dumps** (for example raw Slither output) that they cannot interpret, or
 - **Generic LLM answers** with no deterministic grounding that they cannot trust.
 
 Neither tells them *what is actually dangerous* or *how an attack would really happen*.
@@ -32,6 +32,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 3. **Muse Spark Open** (Meta's open-weights model) triages the findings: confirms real issues, ranks by exploitability, and explains each issue in plain language.
 4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid) for each confirmed finding.
 5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Slither" or "Unverified patch".
+6. If F3 rejects the patch, the user can **retry once** (Muse Wonder when configured, else Spark) — still verified by Slither.
 
 **Core differentiation:** not just "find bugs", but *show how the hack would actually happen*, and check the fix with the same deterministic tool.
 
@@ -44,6 +45,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | **F1** | Deterministic static signal | Slither |
 | **F2** | Triage, plain-language explanation, patch proposal, Mermaid exploit flow | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
 | **F3** | Patch re-verification (Slither re-check) | Slither on proposed `patched_code` |
+| **Retry** (optional) | One user-triggered repair if F3 rejects the patch | Muse Wonder when `LLM_RETRY_MODEL` is set; otherwise Muse Spark |
 
 ```mermaid
 flowchart TD
@@ -54,8 +56,10 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
+    I -->|"F3 rejected (user clicks Retry once)"| J["Optional: Muse Wonder repair"]
+    J --> I
 ```
 
 ### Verification Schema
@@ -65,6 +69,8 @@ flowchart TD
 **F2 - Muse Spark Open Triage:** Meta Muse Spark Open reads both the contract and Slither findings and returns structured JSON findings, plain-language explanations, Mermaid exploit-flow diagrams, and optional patch proposals.
 
 **F3 - Patch verification:** proposed fixes are re-analyzed by Slither before they are labeled verified.
+
+**Optional retry - Muse Wonder:** if F3 rejects a real patch, the user can trigger **one** repair pass (Muse Wonder when configured). The new patch is still subject to F3.
 
 **Presentation (alongside the pipeline):** finding cards with severity, plain language, and Mermaid diagrams. Reasoning-aware parsing validates Muse JSON with Pydantic and one repair retry.
 
@@ -95,7 +101,7 @@ Retry does **not** run on identical patches, empty patches, or pure infra failur
 
 ## Tech stack
 
-- **Core AI Engine:** Meta Muse Spark Open via Baseten Inference
+- **Core AI Engine:** Meta Muse Spark Open via Baseten Inference (optional Muse Wonder on self-heal retry)
 - **Static Analysis:** [Slither](https://github.com/crytic/slither) with `solc-select` (Docker image)
 - **Backend:** Python, FastAPI, Pydantic
 - **Frontend:** HTML / JavaScript with [Mermaid.js](https://mermaid.js.org/)
