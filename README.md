@@ -12,7 +12,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
-- **Sentry Vision combines them:** Slither detects, a Meta model interprets and visualizes, and Slither verifies the fix.
+- **Sentry Vision combines them:** Sli ther detects, a Meta model interprets and visualizes, and Slither verifies the fix.
 
 ---
 
@@ -31,7 +31,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 2. **Slither** runs deterministic static detection (detector, impact, confidence, affected lines).
 3. **Muse Spark Open** (Meta's open-weights model) triages the findings: confirms real issues, ranks by exploitability, and explains each issue in plain language.
 4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid) for each confirmed finding.
-5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Sli ther" or "Unverified patch".
+5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Slither" or "Unverified patch".
 
 **Core differentiation:** not just "find bugs", but *show how the hack would actually happen*, and check the fix with the same deterministic tool.
 
@@ -54,7 +54,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Sli ther re-verification"]
+    H --> I["F3: Slither re-verification"]
     I --> G
 ```
 
@@ -70,12 +70,26 @@ flowchart TD
 
 When F1 cannot run (compile failure, Slither unavailable, or Slither disabled), the UI meta line reports **Pipeline: F2 only (static analysis unavailable)** instead of implying a full F1 → F2 → F3 path.
 
----
+### Bounded self-heal (optional retry)
+
+When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
+
+| Piece | Behavior |
+| --- | --- |
+| **Trigger** | User clicks **Retry patch once** (never auto) |
+| **Server state** | `meta.analysis_id` — original source + findings stored in memory (~1h TTL) |
+| **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
+| **Cap** | `MAX_PATCH_RETRIES=1` enforced server-side |
+| **Default model** | Muse Spark (same as F2) |
+| **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` to a Muse Wonder id — pill turns green only when configured |
+
+Retry does **not** run on identical patches, empty patches, or pure infra failures (`timeout` / `slither_unavailable`). Invalid retry JSON does not burn the one attempt. Verified still means “Slither no longer reports that High/Medium issue,” not “safe to deploy.”
 
 ## Meta models used
 
-- **Muse Spark Open** (`meta-models/muse-spark-open-1026`), Meta's open-weights model, is the core reasoning engine (via Baseten OpenAI-compatible API).
-- **Development:** Muse Spark Open was also used as a coding assistant while building this project.
+- **Muse Spark Open** (`meta-models/muse-spark-open-1026`) — default F2 triage / patch proposal (Baseten OpenAI-compatible API).
+- **Muse Wonder** (optional) — stronger one-shot repair on user-triggered retry when `LLM_RETRY_MODEL` is set.
+- **Development:** Muse tools were also used as coding assistants while building this project.
 
 ---
 
@@ -117,6 +131,8 @@ cp .env.example .env
 LLM_API_KEY=your_baseten_api_key
 LLM_BASE_URL=https://inference.baseten.co/v1
 LLM_MODEL=meta-models/muse-spark-open-1026
+# Optional: Muse Wonder for the single self-heal retry
+# LLM_RETRY_MODEL=meta-models/<muse-wonder-id>
 ENABLE_SLITHER=true
 ALLOWED_ORIGINS=http://localhost:8000
 ```
@@ -137,6 +153,7 @@ uvicorn main:app --reload --port 8000
 - UI: http://localhost:8000
 - Health: `GET /health`
 - API: `POST /analyze` with `{ "solidity_code": "..." }`
+- Retry: `POST /analyze/{analysis_id}/retry-patch` (max 1; requires prior `/analyze`)
 
 ---
 
@@ -156,83 +173,28 @@ uvicorn main:app --reload --port 8000
 | **Patch verified by Slither** (green) | F3: Sli ther no longer reports High/Medium on that patch (not a full audit) |
 | **Patch failed Slither re-check** | F3 rejected the proposed fix — verification can say no |
 | **Fix proposed** | Muse returned a full patched contract |
+| **Retry patch once** (amber bar) | F3 failed → one user-triggered repair + F3 again |
 
 Optional: try **Access Control** and **Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
 
-### Verification can say no
-
-F3 is not a rubber stamp. If Muse proposes a weak or incomplete fix, Slither can still report High/Medium findings on the patched code. In that case the UI shows **Patch failed Slither re-check** (not the green verified badge).
-
-That failure path matters: it proves the badge is earned by a second deterministic scan, not by trusting the model alone.
-
 ---
 
-## Regression fixtures (`examples/`)
+## Project status
 
-| File | UI sample | Expected primary issues |
-| --- | --- | --- |
-| [`01_reentrancy.sol`](examples/01_reentrancy.sol) | Reentrancy | Reentrancy (external call before balance update) |
-| [`02_missing_access_control.sol`](examples/02_missing_access_control.sol) | Access Control | Missing access control on `emergencyWithdraw` |
-| [`03_unchecked_call.sol`](examples/03_unchecked_call.sol) | Unchecked Call | Unchecked low-level call / CEI-style issues |
-| [`04_tx_origin_auth.sol`](examples/04_tx_origin_auth.sol) | — | `tx.origin` authentication |
-| [`05_safe_minimal.sol`](examples/05_safe_minimal.sol) | — | Ideally no Critical/High findings |
-
-These contracts are self-contained (no OpenZeppelin imports) so Slither can run in the Docker image. They are **demo / triage fixtures**, not formal audit ground truth. Sample source in the UI matches these files and does **not** include comments that name the vulnerability.
-
----
-
-## Hackathon progress
-
-Everything in this repository is being built during the hackathon window. An earlier pre-hackathon prototype exists in a separate private repository and is **not** part of this submission.
-
-| Milestone | Status |
+| Item | Status |
 | --- | --- |
 | FastAPI + Muse Spark Open via Baseten (`/analyze`) | Done |
-| UI: finding cards, severity badges, Mermaid flows | Done |
-| F1 Slither (Docker image + `solc-select`) | Done |
-| F2 Muse triage, plain language, patch proposal | Done |
-| F3 Sli ther re-verification on proposed patches | Done |
-| Sample contracts (UI buttons + `examples/*.sol`) | Done |
-| Live deploy on Render (Docker) | Done |
-| Collapsible patches, F3 skip when no patch | Done |
-| Honest pipeline label when F1 unavailable | Done |
-| Demo video | Planned |
-
-The commit history shows when each piece was built.
-
----
+| Bounded self-heal (`analysis_id`, max 1 retry) | Done |
+| Slither F1 + F3 in Docker | Done |
+| UI status pills + honest Wonder labeling | Done |
 
 ## Limitations
 
-- This is **not a formal audit** and gives no guarantee that a contract is safe.
-- Slither can produce false positives, and no static analyzer finds every bug. The model can also be wrong.
-- A patch marked "verified by Slither" only means Slither no longer reports High/Medium findings on that patch — not that the original issue is fully gone in every sense, and not that the contract is secure overall.
-- Contracts that depend on external imports may not compile when pasted as a single file.
-- Always have important contracts reviewed by a professional auditor before deployment.
-
----
-
-## Roadmap
-
-- Multi-file and import support
-- Secure-flow diagram showing the path after the fix
-- Upload an architecture screenshot for analysis (Muse Spark Open supports vision)
-- Integration into the digital assets security verification project [cryptoreviewlab.com](https://cryptoreviewlab.com) review workflow
-- CryptoReviewLab [Repository](https://github.com/chokri29/Crypto-Review-Lab)
-
----
-
-## Credits
-
-- [Slither](https://github.com/crytic/slither) by Trail of Bits
-- [Mermaid.js](https://mermaid.js.org/)
-- Meta — Muse Spark Open and the hackathon
-- Baseten — inference credits and hosting
+- Not a substitute for a professional audit.
+- F3 “verified” is detector-scoped (Slither High/Medium), not a proof of safety.
+- Retry state is **in-memory** (lost on restart / multi-instance).
+- Multi-file repos and agentic tool loops are out of scope for this demo.
 
 ## License
 
-MIT (add a `LICENSE` file when ready).
-
-## Author
-
-Chokri AlGhanmi ([@chokri29](https://github.com/chokri29))
+MIT
