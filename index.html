@@ -185,49 +185,70 @@
   <script>
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
 
-    function setPill(el, valueEl, state, text) {
-      if (!el || !valueEl) return;
-      el.classList.remove('checking', 'off');
-      if (state === 'off') el.classList.add('off');
-      else if (state === 'checking') el.classList.add('checking');
-      valueEl.textContent = text;
+    function setPill(el, valueEl, state, text, titleText) {
+  if (!el || !valueEl) return;
+  el.classList.remove('checking', 'off');
+  if (state === 'off') el.classList.add('off');
+  else if (state === 'checking') el.classList.add('checking');
+  valueEl.textContent = text;
+  el.title = titleText || text; // full model name visible on hover when truncated
+}
+
+async function refreshHealthStatus() {
+  const slitherEl  = document.getElementById('pillSlither');
+  const slitherVal = document.getElementById('pillSlitherValue');
+  const modelEl    = document.getElementById('pillModel');
+  const modelVal   = document.getElementById('pillModelValue');
+
+  setPill(slitherEl, slitherVal, 'checking', '…');
+  setPill(modelEl, modelVal, 'checking', '…');
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const res = await fetch('/health', { cache: 'no-store', signal: controller.signal });
+    if (!res.ok) throw new Error('health ' + res.status);
+    const data = await res.json();
+
+    // --- Slither ---
+    const slitherOn = !!(data.slither_available && data.slither_enabled !== false);
+    if (slitherOn) {
+      setPill(slitherEl, slitherVal, 'on', 'ON');
+    } else if (data.slither_enabled === false) {
+      setPill(slitherEl, slitherVal, 'off', 'OFF');
+    } else {
+      setPill(slitherEl, slitherVal, 'off', 'Unavailable');
     }
 
-    async function refreshHealthStatus() {
-      const slitherEl = document.getElementById('pillSlither');
-      const slitherVal = document.getElementById('pillSlitherValue');
-      const modelEl = document.getElementById('pillModel');
-      const modelVal = document.getElementById('pillModelValue');
-      setPill(slitherEl, slitherVal, 'checking', '…');
-      setPill(modelEl, modelVal, 'checking', '…');
-      try {
-        const res = await fetch('/health', { cache: 'no-store' });
-        if (!res.ok) throw new Error('health ' + res.status);
-        const data = await res.json();
-        const slitherOn = !!(data.slither_available && data.slither_enabled !== false);
-        if (slitherOn) {
-          setPill(slitherEl, slitherVal, 'on', 'ON');
-        } else if (data.slither_enabled === false) {
-          setPill(slitherEl, slitherVal, 'off', 'OFF');
-        } else {
-          setPill(slitherEl, slitherVal, 'off', 'Unavailable');
-        }
-        const modelName = (data.model || '').toString();
-        let modelLabel = 'Muse Spark Open (Baseten)';
-        if (modelName) {
-          if (modelName.indexOf('muse-spark') !== -1) {
-            modelLabel = 'Muse Spark Open (Baseten)';
-          } else {
-            modelLabel = modelName.length > 36 ? modelName.slice(0, 34) + '…' : modelName;
-          }
-        }
-        setPill(modelEl, modelVal, 'on', modelLabel);
-      } catch (err) {
-        console.warn('Health check failed', err);
-        setPill(slitherEl, slitherVal, 'off', 'Unavailable');
-        setPill(modelEl, modelVal, 'off', 'Unavailable');
-      }
+    // --- Model ---
+    const modelName = (data.model || '').toString().trim();
+    const normalised = modelName.toLowerCase();
+    let modelLabel = 'Muse Spark Open (Baseten)';
+    if (modelName && normalised.indexOf('muse-spark') === -1) {
+      modelLabel = modelName.length > 36 ? modelName.slice(0, 34) + '…' : modelName;
     }
+
+    // Backward compatible: if /health doesn't send these fields yet,
+    // presence of a model name is treated as "configured".
+    const modelAvailable = data.model_available ?? data.llm_available;
+    const modelDisabled  = data.model_enabled === false || data.llm_enabled === false;
+
+    if (modelDisabled) {
+      setPill(modelEl, modelVal, 'off', 'OFF', modelName);
+    } else if (!modelName || modelAvailable === false) {
+      setPill(modelEl, modelVal, 'off', 'Unavailable', modelName || 'No model reported by /health');
+    } else {
+      setPill(modelEl, modelVal, 'on', modelLabel, modelName);
+    }
+  } catch (err) {
+    console.warn('Health check failed', err);
+    setPill(slitherEl, slitherVal, 'off', 'Unavailable');
+    setPill(modelEl, modelVal, 'off', 'Unavailable');
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
 
     refreshHealthStatus();
     setInterval(refreshHealthStatus, 60000);
