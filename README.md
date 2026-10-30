@@ -12,7 +12,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
-- **Sentry Vision combines them:** Sli ther detects, a Meta model interprets and visualizes, and Slither verifies the fix.
+- **Sentry Vision combines them:** Slither detects, a Meta model interprets and visualizes, and Slither verifies the fix.
 
 ---
 
@@ -20,7 +20,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 Developers and non-technical founders usually get one of two things:
 
-- **Dense static-analysis dumps** (for example raw Slither output) that they cannot interpret, or
+- **Dense static-analysis dumps** (for example raw Sli ther output) that they cannot interpret, or
 - **Generic LLM answers** with no deterministic grounding that they cannot trust.
 
 Neither tells them *what is actually dangerous* or *how an attack would really happen*.
