@@ -88,8 +88,8 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | **Server state** | `meta.analysis_id` — original source + findings in memory (~1h TTL) |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
 | **Cap** | `MAX_PATCH_RETRIES=1` server-side |
-| **Default model** | Muse Spark (same as F2) |
-| **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; this uses a separate Meta client and never the Baseten key |
+| **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; retry is enabled only when `LLM_RETRY_API_KEY` is configured |
+| **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; separate Meta client, never the Baseten key. Without the Meta key, the retry action stays unavailable |
 
 Retry does **not** run on identical patches, empty patches, or pure infra failures. The pass label means only the claim above — not "safe to deploy."
 
