@@ -129,7 +129,7 @@ class Finding(BaseModel):
     patch_verification_details: Optional[str] = None
     patch_failure_kind: Optional[Literal[
         "still_vulnerable", "compile_failed", "regression_introduced",
-        "surface_removed", "gutted_function", "model_no_patch", "patch_identical", "infra_error", "verification_skipped,
+        "surface_removed", "gutted_function", "model_no_patch", "patch_identical", "infra_error", "verification_skipped",
     ]] = None
     remaining_checks: list[str] = Field(default_factory=list)
     behaviour_lite_passed: bool = False
