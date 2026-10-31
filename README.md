@@ -138,9 +138,9 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 ## Credits
 
 - [Slither](https://github.com/crytic/slither) by Trail of Bits
-- [Mermaid.js](https://mermaid.js.org/)
-- [Meta] (https://github.com/facebookresearch) — Muse Spark Open + Meta Wonder 
-- [Baseten] (https://github.com/basetenlabs) — inference credits and hosting
+- [Mermaid.js](https://mermaid.js.org)
+- [Meta](https://ai.meta.com) — Muse Spark Open + Meta Wonder 
+- [Baseten](https://baseten.co) — inference credits and hosting
 
 ## License
 
