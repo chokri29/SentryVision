@@ -125,6 +125,7 @@
     .patch-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
     .patch-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
     .patch-details { margin: 0 0 8px; color: var(--muted); font-size: 0.88rem; }
+    .model-only-banner { margin: 0 0 16px; padding: 14px 16px; border: 1px solid rgba(251,191,36,.45); border-radius: 12px; background: rgba(120,83,12,.18); color: #fde68a; font-weight: 800; }
     .patch-toggle { background: var(--panel-2); border: 1px solid var(--border); color: #b7c6d6; border-radius: 8px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; margin-bottom: 8px; }
     .patch-code { display: none; width: 100%; max-height: 220px; overflow: auto; background: #0d131a; color: #7dd3c7; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem; white-space: pre; }
     .patch-code.open { display: block; }
@@ -141,7 +142,7 @@
         <span class="status-pill model checking" id="pillModel"><span class="dot"></span><span class="label">Spark</span><span class="value" id="pillModelValue">…</span></span>
         <span class="status-pill wonder checking" id="pillWonder"><span class="dot"></span><span class="label">Wonder</span><span class="value" id="pillWonderValue">…</span></span>
       </div>
-      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Passed Slither re-scan + surface check</em> means no High/Medium findings remain and every original public signature is still present — not that the contract is fully safe. Deleting or gutting entry points to silence Slither is rejected.</p>
+      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Passed Slither re-scan + surface check</em> means no High/Medium findings remain and every original public entry point name + parameter types is preserved, and the behaviour-lite check rejects clear empty/reverting stubs — not that behaviour is preserved or the contract is safe. Deleting or gutting entry points to silence Slither is rejected.</p>
     </header>
     <section class="panel">
       <div class="samples">
@@ -155,6 +156,7 @@
       <div id="status" class="status"></div>
     </section>
     <section id="results">
+      <div id="modelOnlyBanner" class="model-only-banner" role="status" hidden>Model-only result — not verified</div>
       <div class="summary">
         <h2>Audit Summary</h2>
         <p id="summaryText"></p>
@@ -290,7 +292,9 @@
       if (failureKind === 'compile_failed') return 'Patch failed to compile';
       if (failureKind === 'still_vulnerable') return 'Still vulnerable';
       if (failureKind === 'regression_introduced') return 'New issue introduced';
-      if (failureKind === 'surface_removed') return 'Patch removed/changed public signatures';
+      if (failureKind === 'surface_removed') return 'Patch removed/changed public entry points';
+      if (failureKind === 'gutted_function') return 'Patch gutted a preserved entry point';
+      if (s === 'model_only') return 'Model-only result — not verified';
       if (failureKind === 'model_no_patch') return 'No patch produced';
       if (failureKind === 'verification_skipped') return 'Model only — not verified';
       if (s === 'failed') return 'Patch failed Slither re-check';
@@ -392,6 +396,9 @@
       const results = document.getElementById('results');
       const findings = Array.isArray(data.findings) ? data.findings : [];
       const meta = data.meta || {};
+      const modelOnlyBanner = document.getElementById("modelOnlyBanner");
+      const modelOnly = meta.f1_ran === false || String(meta.pipeline_label || "").toLowerCase().includes("model-only") || findings.some(function (finding) { return finding.patch_verification_status === "model_only"; });
+      if (modelOnlyBanner) modelOnlyBanner.hidden = !modelOnly;
       lastAnalysisId = meta.analysis_id || lastAnalysisId;
       summaryText.textContent = typeof data.summary === 'string' ? data.summary : 'No summary provided.';
       const pipelineLabel = meta.pipeline_label || 'F1 → F2 → F3';

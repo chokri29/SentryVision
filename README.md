@@ -52,8 +52,9 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 Green **Passed Slither re-scan + surface check** means:
 
 1. The patch **compiles** under the pinned solc.
-2. Slither reports **no Critical/High/Medium** on the patch.
-3. Every original **public/external signature** (plus `receive`/`fallback`) is still present.
+2. Slither reports **no High/Medium** on the patch.
+3. Every original public/external entry point **name + parameter types** (plus `receive`/`fallback`) is still present.
+4. The behaviour-lite check rejects clear empty or always-reverting bodies when the original entry point had non-gutted logic.
 
 It does **not** mean the contract is safe, that behaviour is preserved, or that Low/Informational issues are gone.
 
@@ -63,7 +64,7 @@ F1 can resolve a **small** set of `@openzeppelin/contracts/...` imports via `ven
 
 ### Bounded self-heal (optional retry)
 
-When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface_removed`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
+When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface_removed`, `gutted_function`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
 
 | Piece | Behavior |
 | --- | --- |
@@ -113,8 +114,9 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 ## Limitations
 
 - Not a professional audit.
-- F3 claim is detector-scoped + signature surface — not behavioural equivalence.
-- OZ support is a **vendored subset** (4.9.6-oriented), not full OZ.
+- F3 claim is compile + Slither re-scan clean (no High/Medium) + name + parameter types surface preserved + behaviour-lite passed. It does not establish behavioural preservation or security.
+- A green pytest suite is test evidence, not proof of complete verification.
+- OZ support is a **vendored OZ subset** with documented supported import paths; it is not audited upstream code and is not claimed equivalent to real OpenZeppelin.
 - Retry store is in-memory.
 
 ## License

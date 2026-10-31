@@ -14,6 +14,12 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Install solc for real Slither end-to-end tests
+        run: |
+          pip install "solc-select>=1.0.4"
+          solc-select install 0.8.20
+          solc-select use 0.8.20
+          solc --version
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}
