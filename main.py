@@ -564,7 +564,11 @@ def analyze_contract(request: Request, payload: AuditRequest):
             findings = verify_patches(result.findings, original_code=code, original_high_medium_checks=original_high_medium_checks, allow_verification=slither_error is None)
             analysis_id = new_analysis_id()
             store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
-            any_retry = any(getattr(f, "retry_available", False) for f in findings)
+            # Do not advertise a retry action unless the separate Meta credential is configured.
+            if not RETRY_API_KEY:
+                for finding in findings:
+                    finding.retry_available = False
+            any_retry = bool(RETRY_API_KEY) and any(getattr(f, "retry_available", False) for f in findings)
             return AuditResponse(summary=result.summary, findings=findings, meta={
                 "analysis_id": analysis_id, "model": MODEL_NAME, "reasoning_repaired": attempt > 0,
                 "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
