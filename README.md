@@ -47,6 +47,22 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | **F3** | Patch re-scan + surface check | Slither + signature surface |
 | **Retry** (optional) | One user-triggered repair if F3 rejects | Muse Wonder when `LLM_RETRY_MODEL` is set |
 
+```mermaid
+flowchart TD
+    A["Solidity contract (.sol)"] --> B["F1: Slither static analysis"]
+    B --> C["Slither JSON findings"]
+    C --> D["F2: Muse Spark Open triage"]
+    A --> D
+    D --> E["Structured JSON findings + Mermaid flows"]
+    E --> G["Finding cards"]
+    D --> H["Patch proposal"]
+    H --> I["F3: Slither re-verification"]
+    I --> G
+    I -->|"Rejected: user clicks Retry once"| J["Optional: Muse Wonder repair"]
+    J --> K["F3: Slither re-check"]
+    K --> G
+```
+
 ### Verification claim (honest)
 
 Green **Passed Slither re-scan + surface check** means:
