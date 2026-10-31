@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ENABLE_SLITHER=true \
     SOLC_VERSION=0.8.20 \
     PORT=8000 \
-    PATH="/home/appuser/.local/bin:$PATH"
+    PATH="/home/appuser/.local/bin:$PATH" \
+    SOLC_SELECT_INSTALL_DIR=/home/appuser/.solc-select
 
 # Minimal OS deps for solc binaries and git-based installs
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,11 +30,13 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install "solc-select>=1.0.4"
 
-# Install compilers AS appuser - they land in /home/appuser/.solc-select
+# Install a range of 0.8.x compilers AS appuser (land in /home/appuser/.solc-select)
+# Include versions common in patches and samples; default active = 0.8.20
 USER appuser
-RUN solc-select install 0.8.20 0.8.19 0.8.17 0.8.0 \
+RUN solc-select install 0.8.0 0.8.4 0.8.7 0.8.10 0.8.13 0.8.16 0.8.17 0.8.19 0.8.20 0.8.24 0.8.26 \
     && solc-select use 0.8.20 \
     && solc --version \
+    && which solc \
     && slither --version
 
 # Application source - back to root only to copy/chown
