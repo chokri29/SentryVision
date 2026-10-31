@@ -22,7 +22,7 @@ logger = logging.getLogger("sentryvision.slither")
 SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
 DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20")
-KEEP_IMPACTS = {"High", "Medium", "Critical"}
+KEEP_IMPACTS = {"High", "Medium"}
 PRIORITY_CHECKS = {
     "reentrancy-eth", "reentrancy-no-eth", "reentrancy-benign", "reentrancy-events",
     "reentrancy-unlimited-gas", "controlled-delegatecall", "delegatecall-loop",
@@ -86,6 +86,12 @@ def _extract_solc_version(source_code: str) -> str:
 _SOLC_LOCK = threading.Lock()
 OZ_ROOT = Path(__file__).resolve().parent / "vendor" / "openzeppelin" / "contracts"
 _OZ_PREFIXES = ("@openzeppelin/contracts/", "openzeppelin-contracts/contracts/", "lib/openzeppelin-contracts/contracts/")
+SUPPORTED_OZ_IMPORTS = frozenset({
+    "access/Ownable.sol", "interfaces/IERC20.sol", "security/Pausable.sol",
+    "security/ReentrancyGuard.sol", "token/ERC20/ERC20.sol", "token/ERC20/IERC20.sol",
+    "token/ERC20/extensions/IERC20Metadata.sol", "token/ERC20/utils/SafeERC20.sol",
+    "utils/Address.sol", "utils/Context.sol", "utils/Pausable.sol", "utils/ReentrancyGuard.sol",
+})
 _IMPORT_RE = re.compile(r"""import\s+(?:[^'";]*?\s+from\s+)?(?P<q>["'])(?P<path>[^"']+)(?P=q)""")
 
 def oz_relative(path: str) -> Optional[str]:
@@ -99,7 +105,7 @@ def rewrite_known_oz_imports(source: str) -> str:
     def repl(match: re.Match) -> str:
         path = match.group("path")
         rel = oz_relative(path)
-        if not rel or not (OZ_ROOT / rel).is_file():
+        if not rel or rel not in SUPPORTED_OZ_IMPORTS or not (OZ_ROOT / rel).is_file():
             return match.group(0)
         quote = match.group("q")
         return match.group(0).replace(f"{quote}{path}{quote}", f"{quote}./oz/{rel}{quote}", 1)
@@ -113,7 +119,7 @@ def unsupported_imports(source: str) -> List[str]:
         if path in seen:
             continue
         rel = oz_relative(path)
-        if rel is not None and (OZ_ROOT / rel).is_file():
+        if rel is not None and rel in SUPPORTED_OZ_IMPORTS and (OZ_ROOT / rel).is_file():
             continue
         if rel is not None or path.startswith(".") or path.startswith("@") or "/" in path or path.endswith(".sol"):
             seen.add(path)
@@ -218,7 +224,7 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
     if missing:
         shown = ", ".join(missing[:5])
         extra = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
-        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Unsupported import: {shown}{extra}. Result is model-only.", "error_kind": "compile_failed"}
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Unsupported import: {shown}{extra}. Result is model-only.", "error_kind": "unsupported_import", "unresolved_imports": missing}
     rewritten = rewrite_known_oz_imports(source_code)
     solc_ver, solc_bin = _resolve_solc_binary(_extract_solc_version(source_code))
     source = _normalize_pragma(rewritten, version=solc_ver)
@@ -437,30 +443,138 @@ def surface_gap(original_code: str, patched_code: str) -> List[str]:
 def high_medium_check_names(detectors: list) -> List[str]:
     return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
 
-def verify_patch(patched_code: str, target_checks: Optional[List[str]] = None, contract_name: str = "Patched.sol", original_entry_points: Optional[List[str]] = None) -> Dict[str, Any]:
+def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
+    """Conservatively map public/external entry signatures to source bodies."""
+    if not source_code or not source_code.strip():
+        return {}
+    cleaned = _strip_solidity(source_code)
+    found: Dict[str, List[str]] = {}
+    for contract in re.finditer(r"\b(contract|library|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b", cleaned):
+        if contract.group(1) == "interface":
+            continue
+        brace = cleaned.find("{", contract.end())
+        if brace < 0:
+            continue
+        contract_end = _match_brace(cleaned, brace)
+        if contract_end < 0:
+            continue
+        body = _blank_assembly(cleaned[brace + 1:contract_end])
+        entries = list(re.finditer(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", body))
+        entries += [m for keyword in ("receive", "fallback") for m in re.finditer(rf"\b{keyword}\s*\(", body)]
+        for entry in entries:
+            name = entry.group(1) if entry.group(1) else entry.group(0).split("(")[0].strip()
+            open_paren = entry.end() - 1
+            header, kind = _header_after_params(body, open_paren)
+            if kind != "body" or not _is_public_header(header):
+                continue
+            close_paren = _match_paren(body, open_paren)
+            if close_paren < 0:
+                continue
+            open_brace = close_paren + 1 + len(header)
+            if open_brace >= len(body) or body[open_brace] != "{":
+                continue
+            close_brace = _match_brace(body, open_brace)
+            if close_brace < 0:
+                continue
+            signature = f"{name}()" if name in {"receive", "fallback"} else f"{name}({','.join(_param_types_from_list(_params_inside(body, open_paren)))})"
+            found.setdefault(signature, []).append(body[open_brace + 1:close_brace])
+    return found
+
+
+def _is_gutted_body(body: str) -> bool:
+    """Recognize only clear empty/always-reverting bodies; ambiguity fails open."""
+    cleaned = _strip_solidity(body).strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"revert(?:\s*\([^;]*\))?\s*;?", cleaned):
+        return True
+    if re.fullmatch(r"require\s*\(\s*false\s*(?:,\s*.*?)?\s*\)\s*;?", cleaned):
+        return True
+    return False
+
+
+def gutted_entry_points(original_code: Optional[str], patched_code: str) -> List[str]:
+    """Find preserved entry points changed from useful bodies to clear stubs."""
+    if not original_code:
+        return []
+    original = _public_entry_bodies(original_code)
+    patched = _public_entry_bodies(patched_code)
+    gutted: List[str] = []
+    for signature in sorted(set(original) & set(patched)):
+        old_bodies, new_bodies = original[signature], patched[signature]
+        # Ambiguous duplicate extraction is deliberately not treated as evidence.
+        if len(old_bodies) != len(new_bodies):
+            continue
+        for old_body, new_body in zip(old_bodies, new_bodies):
+            if not _is_gutted_body(old_body) and _is_gutted_body(new_body):
+                gutted.append(signature)
+                break
+    return gutted
+
+
+def high_medium_check_names(detectors: list) -> List[str]:
+    return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
+
+
+def verify_patch(
+    patched_code: str,
+    target_checks: Optional[List[str]] = None,
+    contract_name: str = "Patched.sol",
+    original_entry_points: Optional[List[str]] = None,
+    original_code: Optional[str] = None,
+) -> Dict[str, Any]:
+    base = {
+        "patch_verified": False, "patch_verification_status": "not_checked",
+        "verification_error_kind": None, "patch_verification_details": "",
+        "remaining_checks": [], "surface_removed": [], "behaviour_lite_passed": False,
+        "gutted_functions": [], "unresolved_imports": [],
+    }
     if not patched_code or not patched_code.strip():
-        return {"patch_verified": False, "patch_verification_status": "not_checked", "verification_error_kind": None, "patch_verification_details": "No patched code provided.", "remaining_checks": [], "surface_removed": []}
+        base["patch_verification_details"] = "No patched code provided."
+        return base
     result = run_slither(patched_code, contract_name)
     if result is None:
-        return {"patch_verified": False, "patch_verification_status": "slither_unavailable", "verification_error_kind": "slither_unavailable", "patch_verification_details": "Patch generated by Muse Spark, awaiting Slither re-verification.", "remaining_checks": [], "surface_removed": []}
+        base.update({"patch_verification_status": "slither_unavailable", "verification_error_kind": "slither_unavailable", "patch_verification_details": "Patch generated by Muse Spark, awaiting Slither re-verification."})
+        return base
     if not result.get("success"):
         err = result.get("error") or "unknown error"
         kind = result.get("error_kind") or _classify_slither_error(err)
-        return {"patch_verified": False, "patch_verification_status": "failed", "verification_error_kind": kind, "patch_verification_details": "Could not compile/verify patch with Slither: " + err, "remaining_checks": [], "surface_removed": []}
+        unresolved = list(result.get("unresolved_imports") or [])
+        model_only = kind == "unsupported_import"
+        base.update({
+            "patch_verification_status": "model_only" if model_only else "failed",
+            "verification_error_kind": kind,
+            "patch_verification_details": ("Model-only result — not verified. Unresolved imports: " + ", ".join(unresolved)) if model_only else "Could not compile/verify patch with Slither: " + err,
+            "unresolved_imports": unresolved,
+        })
+        return base
     high_medium = high_medium_check_names(result.get("detectors") or [])
     missing: List[str] = []
     if original_entry_points:
-        patched_surface = set(public_entry_points(patched_code))
-        missing = sorted(set(original_entry_points) - patched_surface)
+        missing = sorted(set(original_entry_points) - set(public_entry_points(patched_code)))
+    gutted = gutted_entry_points(original_code, patched_code)
+    base.update({"remaining_checks": high_medium, "surface_removed": missing, "gutted_functions": gutted, "behaviour_lite_passed": not gutted})
     if high_medium:
         details = "Patch still has High/Medium Slither findings: " + ", ".join(high_medium)
         if missing:
             details += ". Also removed public functions: " + ", ".join(missing)
-        return {"patch_verified": False, "patch_verification_status": "failed", "verification_error_kind": None, "patch_verification_details": details, "remaining_checks": high_medium, "surface_removed": missing}
+        if gutted:
+            details += ". Gutted preserved entry points: " + ", ".join(gutted)
+        base.update({"patch_verification_status": "failed", "patch_verification_details": details})
+        return base
     if missing:
-        return {"patch_verified": False, "patch_verification_status": "failed", "verification_error_kind": None, "patch_verification_details": "Slither reports no High/Medium issues, but public functions were removed: " + ", ".join(missing) + ". Deleting an entry point is not a fix.", "remaining_checks": [], "surface_removed": missing}
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither reports no High/Medium issues, but public functions were removed: " + ", ".join(missing) + ". Deleting an entry point is not a fix."})
+        return base
+    if gutted:
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither re-scan is clean, but preserved public entry points were gutted: " + ", ".join(gutted) + "."})
+        return base
     if target_checks:
         still_present = [c for c in target_checks if c in (result.get("detector_checks") or [])]
         if still_present:
-            return {"patch_verified": False, "patch_verification_status": "failed", "verification_error_kind": None, "patch_verification_details": "Patch still triggers Slither detectors: " + ", ".join(still_present), "remaining_checks": [c for c in still_present if c in high_medium], "surface_removed": []}
-    return {"patch_verified": True, "patch_verification_status": "verified", "verification_error_kind": None, "patch_verification_details": "Slither re-analysis found no High/Medium issues, and the public function surface is unchanged.", "remaining_checks": [], "surface_removed": []}
+            base.update({"patch_verification_status": "failed", "patch_verification_details": "Patch still triggers Slither detectors: " + ", ".join(still_present), "remaining_checks": [c for c in still_present if c in high_medium]})
+            return base
+    base.update({
+        "patch_verified": True, "patch_verification_status": "verified", "behaviour_lite_passed": True,
+        "patch_verification_details": "Slither re-scan found no High/Medium issues; name + parameter types surface is preserved; behaviour-lite check passed.",
+    })
+    return base
