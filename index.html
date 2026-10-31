@@ -205,11 +205,12 @@
         }
         setPill(modelEl, modelVal, 'on', modelLabel);
         const retryModel = (data.retry_model || '').toString();
-        const wonderOn = data.wonder_configured === true ||
-          (retryModel && (retryModel.toLowerCase().indexOf('wonder') !== -1 || (retryModel !== modelName && retryModel.length > 0)));
+        const wonderOn = typeof data.wonder_configured === 'boolean'
+          ? data.wonder_configured
+          : !!(retryModel && (retryModel.toLowerCase().indexOf('wonder') !== -1 || (retryModel !== modelName && retryModel.length > 0)));
         wonderConfigured = !!wonderOn;
         if (wonderOn) setPill(wonderEl, wonderVal, 'on', 'Muse Wonder');
-        else setPill(wonderEl, wonderVal, 'off', 'Same as Spark');
+        else setPill(wonderEl, wonderVal, 'off', 'Not configured');
       } catch (err) {
         setPill(slitherEl, slitherVal, 'off', 'Unavailable');
         setPill(modelEl, modelVal, 'off', 'Unavailable');
