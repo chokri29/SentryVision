@@ -45,7 +45,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | **F1** | Deterministic static signal | Slither |
 | **F2** | Triage, explanation, patch, Mermaid | Muse Spark Open via Baseten |
 | **F3** | Patch re-scan + surface check | Slither + signature surface |
-| **Retry** (optional) | One user-triggered repair if F3 rejects | Muse Wonder when `LLM_RETRY_MODEL` is set |
+| **Retry** (optional) | One user-triggered repair if F3 rejects | Muse Wonder through Meta Model API, using separate `LLM_RETRY_API_KEY` credentials |
 
 ```mermaid
 flowchart TD
@@ -88,8 +88,8 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | **Server state** | `meta.analysis_id` — original source + findings in memory (~1h TTL) |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
 | **Cap** | `MAX_PATCH_RETRIES=1` server-side |
-| **Default model** | Muse Spark (same as F2) |
-| **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` |
+| **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; retry is enabled only when `LLM_RETRY_API_KEY` is configured |
+| **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; separate Meta client, never the Baseten key. Without the Meta key, the retry action stays unavailable |
 
 Retry does **not** run on identical patches, empty patches, or pure infra failures. The pass label means only the claim above — not "safe to deploy."
 
@@ -100,7 +100,7 @@ Retry does **not** run on identical patches, empty patches, or pure infra failur
 
 ## Tech stack
 
-- Meta Muse Spark Open via Baseten (optional Muse Wonder on retry)
+- Meta Muse Spark Open via Baseten (F2); optional Muse Wonder via Meta Model API with separate credentials (retry)
 - [Slither](https://github.com/crytic/slither) + `solc-select` (Docker)
 - Python, FastAPI, Pydantic
 - HTML / JS + [Mermaid.js](https://mermaid.js.org/)
@@ -111,7 +111,7 @@ Retry does **not** run on identical patches, empty patches, or pure infra failur
 ```bash
 git clone https://github.com/chokri29/SentryVision.git
 cd SentryVision
-cp .env.example .env   # set LLM_API_KEY, optional LLM_RETRY_MODEL
+cp .env.example .env   # set Baseten LLM_API_KEY; optionally set separate Meta LLM_RETRY_API_KEY
 docker build -t sentryvision .
 docker run --rm -p 8000:8000 --env-file .env sentryvision
 ```
