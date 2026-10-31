@@ -97,40 +97,88 @@ def _safe_filename(contract_name: str) -> str:
     return name if name.endswith(".sol") else f"{name}.sol"
 
 
-def _normalize_pragma(source_code: str) -> str:
-    """Pin pragma to an installed exact version so crytic-compile/solc succeeds."""
-    pinned = f"pragma solidity {DEFAULT_SOLC};"
+def _normalize_pragma(source_code: str, version: Optional[str] = None) -> str:
+    """Pin pragma to an exact installed solc version so crytic-compile succeeds."""
+    ver = version or DEFAULT_SOLC
+    pinned = f"pragma solidity {ver};"
     if re.search(r"pragma\s+solidity\s+[^;]+;", source_code):
         return re.sub(r"pragma\s+solidity\s+[^;]+;", pinned, source_code, count=1)
     return pinned + "\n" + source_code
 
 
 def _extract_solc_version(source_code: str) -> str:
+    """Pick a concrete solc version that satisfies the pragma when possible.
+
+    Carets / ranges like ^0.8.0 must NOT select the floor (0.8.0) while we pin
+    the source to DEFAULT_SOLC (0.8.20) — that mismatch is the live compile error.
+    """
     m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if not m:
         return DEFAULT_SOLC
     spec = m.group(1).strip()
+
+    # Exact pin: pragma solidity 0.8.20;
+    exact = re.fullmatch(r"(\d+\.\d+\.\d+)", spec)
+    if exact:
+        return exact.group(1)
+
+    # Caret / >= / > ranges on 0.8.x → prefer DEFAULT_SOLC (installed & stable)
+    if re.search(r"[\^>=~]", spec) and "0.8." in spec:
+        return DEFAULT_SOLC
+
     nums = re.findall(r"\d+\.\d+\.\d+", spec)
     if nums:
+        if any(n.startswith("0.8.") for n in nums):
+            return DEFAULT_SOLC
         return nums[-1]
+
     nums2 = re.findall(r"\d+\.\d+", spec)
     if nums2:
-        return nums2[-1] + ".0"
+        major_minor = nums2[-1]
+        if major_minor.startswith("0.8"):
+            return DEFAULT_SOLC
+        return major_minor + ".0"
+
     return DEFAULT_SOLC
 
 
-def _try_set_solc_version(source_code: str) -> None:
-    version = _extract_solc_version(source_code)
-    try:
-        subprocess.run(
-            ["solc-select", "use", version, "--always-install"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except Exception as exc:
-        logger.warning("solc-select failed for %s: %s", version, exc)
+def _try_set_solc_version(version: str) -> str:
+    """Activate solc via solc-select; fall back to DEFAULT_SOLC. Returns version used."""
+    candidates = []
+    for v in (version, DEFAULT_SOLC, "0.8.20", "0.8.19", "0.8.17"):
+        if v and v not in candidates:
+            candidates.append(v)
+
+    last_err = None
+    for ver in candidates:
+        try:
+            proc = subprocess.run(
+                ["solc-select", "use", ver, "--always-install"],
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+            check = subprocess.run(
+                ["solc", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            out = (check.stdout or "") + (check.stderr or "")
+            if check.returncode == 0 and ver in out.replace("v", ""):
+                logger.info("solc-select active: %s", ver)
+                return ver
+            if proc.returncode == 0 and check.returncode == 0:
+                logger.info("solc-select use %s (version string: %s)", ver, out.strip()[:80])
+                return ver
+            last_err = (proc.stderr or proc.stdout or out or "")[:200]
+        except Exception as exc:
+            last_err = str(exc)
+            logger.warning("solc-select failed for %s: %s", ver, exp)
+
+    logger.warning("Could not activate solc; last error: %s", last_err)
+    return version or DEFAULT_SOLC
 
 
 def _short_error(text: str, limit: int = 240) -> str:
@@ -221,8 +269,10 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
             "error_kind": "compile_failed",
         }
 
-    _try_set_solc_version(source_code)
-    source = _normalize_pragma(source_code)
+    # Critical: select solc AND pin pragma to the SAME version (avoids 0.8.0 vs 0.8.20 mismatch)
+    solc_ver = _extract_solc_version(source_code)
+    solc_ver = _try_set_solc_version(solc_ver)
+    source = _normalize_pragma(source_code, version=solc_ver)
     fname = _safe_filename(contract_name)
 
     with tempfile.TemporaryDirectory(prefix="sv_slither_") as tmp:
