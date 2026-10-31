@@ -292,6 +292,7 @@
       if (failureKind === 'still_vulnerable') return 'Still vulnerable';
       if (failureKind === 'regression_introduced') return 'New issue introduced';
       if (failureKind === 'surface_removed') return 'Patch removed public functions';
+      if (failureKind === 'verification_skipped') return 'Model only — not verified';
       if (failureKind === 'model_no_patch') return 'No patch produced';
       if (s === 'failed') return 'Patch failed Slither re-check';
       return 'Patch not checked';
@@ -403,8 +404,10 @@
       summaryText.textContent = typeof data.summary === 'string' ? data.summary : 'No summary provided.';
       const pipelineLabel = meta.pipeline_label || 'F1 → F2 → F3';
       if (summaryMeta) {
-        summaryMeta.textContent = 'Pipeline: ' + pipelineLabel +
-          (meta.is_retry ? ' · Retry #' + (meta.retry_count || 1) : '');
+        let line = 'Pipeline: ' + pipelineLabel;
+        if (meta.f1_ran === false && meta.slither_error) line += ' — ' + meta.slither_error;
+        if (meta.is_retry) line += ' · Retry #' + (meta.retry_count || 1);
+        summaryMeta.textContent = line;
       }
       findingsEl.innerHTML = '';
       if (!findings.length) {

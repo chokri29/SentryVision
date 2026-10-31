@@ -10,8 +10,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -93,32 +95,118 @@ def _extract_solc_version(source_code: str) -> str:
     return DEFAULT_SOLC
 
 
-def _try_set_solc_version(version: str) -> str:
-    candidates = []
-    for v in (version, DEFAULT_SOLC, "0.8.20", "0.8.19", "0.8.17"):
-        if v and v not in candidates:
-            candidates.append(v)
-    last_err = None
-    for ver in candidates:
+_SOLC_LOCK = threading.Lock()
+OZ_ROOT = Path(__file__).resolve().parent / "vendor" / "openzeppelin" / "contracts"
+_OZ_PREFIXES = (
+    "@openzeppelin/contracts/",
+    "openzeppelin-contracts/contracts/",
+    "lib/openzeppelin-contracts/contracts/",
+)
+_IMPORT_RE = re.compile(
+    r"""import\s+(?:[^'";]*?\s+from\s+)?(?P<q>["'])(?P<path>[^"']+)(?P=q)"""
+)
+
+
+def oz_relative(path: str) -> Optional[str]:
+    norm = path.replace("\\", "/").lstrip("./")
+    for prefix in _OZ_PREFIXES:
+        if norm.startswith(prefix):
+            return norm[len(prefix):]
+    return None
+
+
+def rewrite_known_oz_imports(source: str) -> str:
+    """Point supported OpenZeppelin imports at the vendored stub tree."""
+    def repl(match: re.Match) -> str:
+        path = match.group("path")
+        rel = oz_relative(path)
+        if not rel or not (OZ_ROOT / rel).is_file():
+            return match.group(0)
+        quote = match.group("q")
+        return match.group(0).replace(f"{quote}{path}{quote}", f"{quote}./oz/{rel}{quote}", 1)
+    return _IMPORT_RE.sub(repl, source)
+
+
+def unsupported_imports(source: str) -> List[str]:
+    """Imports a single-file scan cannot compile, including unknown OZ paths."""
+    found: List[str] = []
+    seen = set()
+    for match in _IMPORT_RE.finditer(_strip_solidity(source, keep_strings=True)):
+        path = match.group("path")
+        if path in seen:
+            continue
+        rel = oz_relative(path)
+        if rel is not None and (OZ_ROOT / rel).is_file():
+            continue
+        if rel is not None or path.startswith(".") or path.startswith("@") or "/" in path or path.endswith(".sol"):
+            seen.add(path)
+            found.append(path)
+    return found
+
+
+def _slither_command(sol_file: Path, out_file: Path, solc_bin: Optional[str]) -> List[str]:
+    cmd = ["slither", str(sol_file), "--json", str(out_file)]
+    if solc_bin:
+        cmd.extend(["--solc", solc_bin])
+    return cmd
+
+
+def _solc_artifact_path(version: str) -> Optional[Path]:
+    roots: List[Path] = []
+    env_root = os.getenv("SOLC_SELECT_INSTALL_DIR")
+    if env_root:
+        roots.append(Path(env_root))
+    home_root = Path.home() / ".solc-select"
+    if home_root not in roots:
+        roots.append(home_root)
+    for root in roots:
+        candidate = root / "artifacts" / f"solc-{version}" / f"solc-{version}"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _install_solc(version: str) -> Optional[Path]:
+    """Install one compiler if needed. Does not call `solc-select use`."""
+    existing = _solc_artifact_path(version)
+    if existing:
+        return existing
+    with _SOLC_LOCK:
+        existing = _solc_artifact_path(version)
+        if existing:
+            return existing
         try:
             proc = subprocess.run(
-                ["solc-select", "use", ver, "--always-install"],
+                ["solc-select", "install", version],
                 capture_output=True, text=True, timeout=90, check=False,
             )
-            check = subprocess.run(["solc", "--version"], capture_output=True, text=True, timeout=15)
-            out = (check.stdout or "") + (check.stderr or "")
-            if check.returncode == 0 and ver in out.replace("v", ""):
-                logger.info("solc-select active: %s", ver)
-                return ver
-            if proc.returncode == 0 and check.returncode == 0:
-                logger.info("solc-select use %s (%s)", ver, out.strip()[:80])
-                return ver
-            last_err = (proc.stderr or proc.stdout or out or "")[:200]
         except Exception as exc:
-            last_err = str(exc)
-            logger.warning("solc-select failed for %s: %s", ver, exc)
-    logger.warning("Could not activate solc; last error: %s", last_err)
-    return version or DEFAULT_SOLC
+            logger.warning("solc-select install %s failed: %s", version, exc)
+            return None
+        path = _solc_artifact_path(version)
+        if path:
+            logger.info("solc-select installed %s at %s", version, path)
+            return path
+        logger.warning(
+            "solc %s missing after install: %s",
+            version,
+            (proc.stderr or proc.stdout or "")[:200],
+        )
+        return None
+
+
+def _resolve_solc_binary(version: str) -> tuple[str, Optional[str]]:
+    """Pick an installed solc binary. Never switches the process-wide compiler."""
+    candidates: List[str] = []
+    for ver in (version, DEFAULT_SOLC, "0.8.20", "0.8.19", "0.8.17"):
+        if ver and ver not in candidates:
+            candidates.append(ver)
+    for ver in candidates:
+        path = _install_solc(ver)
+        if path:
+            return ver, str(path)
+    logger.warning("No solc binary for %s; Slither will use PATH", version)
+    return version or DEFAULT_SOLC, None
 
 
 def _short_error(text: str, limit: int = 240) -> str:
@@ -184,20 +272,33 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
             "count": 0, "filtered_count": 0, "raw": None, "error": "Empty source", "error_kind": "compile_failed",
         }
 
-    solc_ver = _extract_solc_version(source_code)
-    solc_ver = _try_set_solc_version(solc_ver)
-    source = _normalize_pragma(source_code, version=solc_ver)
+    missing = unsupported_imports(source_code)
+    if missing:
+        shown = ", ".join(missing[:5])
+        extra = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
+        return {
+            "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+            "count": 0, "filtered_count": 0, "raw": None,
+            "error": f"Unsupported import: {shown}{extra}. Result is model-only.",
+            "error_kind": "compile_failed",
+        }
+
+    rewritten = rewrite_known_oz_imports(source_code)
+    solc_ver, solc_bin = _resolve_solc_binary(_extract_solc_version(source_code))
+    source = _normalize_pragma(rewritten, version=solc_ver)
     fname = _safe_filename(contract_name)
 
     with tempfile.TemporaryDirectory(prefix="sv_slither_") as tmp:
         tmp_path = Path(tmp)
+        if "./oz/" in source:
+            shutil.copytree(OZ_ROOT, tmp_path / "oz")
         sol_file = tmp_path / fname
         out_file = tmp_path / "slither.json"
         sol_file.write_text(source, encoding="utf-8")
 
         try:
             proc = subprocess.run(
-                ["slither", str(sol_file), "--json", str(out_file)],
+                _slither_command(sol_file, out_file, solc_bin),
                 capture_output=True, text=True, timeout=SLITHER_TIMEOUT, cwd=str(tmp_path),
             )
         except subprocess.TimeoutExpired:
@@ -260,8 +361,8 @@ def run_slither_on_code(source_code: str, contract_name: str = "Contract.sol") -
     return run_slither(source_code, contract_name)
 
 
-def _strip_solidity(source: str) -> str:
-    """Drop comments and string literals so function scans do not see decoys."""
+def _strip_solidity(source: str, keep_strings: bool = False) -> str:
+    """Drop comments, and string literals unless keep_strings is set."""
     out: List[str] = []
     i = 0
     n = len(source)
@@ -276,6 +377,7 @@ def _strip_solidity(source: str) -> str:
             continue
         if source[i] in "\"'":
             quote = source[i]
+            start = i
             i += 1
             while i < n:
                 if source[i] == "\\":
@@ -285,7 +387,7 @@ def _strip_solidity(source: str) -> str:
                     i += 1
                     break
                 i += 1
-            out.append(" ")
+            out.append(source[start:i] if keep_strings else " ")
             continue
         out.append(source[i])
         i += 1

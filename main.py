@@ -379,7 +379,29 @@ def classify_patch_verification(*, patched_code: Optional[str], original_code: O
     return {"patch_failure_kind": patch_failure_kind, "retry_recommended": retry_recommended, "retry_available": retry_recommended and retry_count < MAX_PATCH_RETRIES}
 
 
-def verify_patches(findings: list, original_code: Optional[str] = None, original_high_medium_checks: Optional[Iterable[str]] = None):
+MODEL_ONLY_DETAILS = "Model only — Slither did not analyze the original contract, so this patch is not verified."
+MODEL_ONLY_PIPELINE = "Model only — not verified (static analysis unavailable)"
+
+
+def verify_patches(findings: list, original_code: Optional[str] = None, original_high_medium_checks: Optional[Iterable[str]] = None, allow_verification: bool = True):
+    if not allow_verification:
+        for f in findings:
+            f.patch_verified = False
+            f.retry_recommended = False
+            f.retry_available = False
+            if (f.patched_code or "").strip():
+                f.patch_verification_status = "not_checked"
+                f.verification_error_kind = None
+                f.patch_failure_kind = "verification_skipped"
+                f.patch_verification_details = MODEL_ONLY_DETAILS
+                f.remaining_checks = []
+            else:
+                f.patch_verification_status = "not_checked"
+                f.verification_error_kind = None
+                c = classify_patch_verification(patched_code=f.patched_code, original_code=original_code, patch_verification_status=f.patch_verification_status, verification_error_kind=f.verification_error_kind, remaining_checks=[], original_high_medium_checks=original_high_medium_checks, retry_count=f.retry_count)
+                f.patch_failure_kind, f.retry_recommended, f.retry_available = c["patch_failure_kind"], False, False
+                f.remaining_checks = []
+        return findings
     has_any_patch = any((f.patched_code or "").strip() for f in findings)
     if not has_any_patch:
         for f in findings:
@@ -515,7 +537,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
             completion = model_client.chat.completions.create(**kwargs)
             raw_content = completion.choices[0].message.content or ""
             result = parse_and_validate_model_output(raw_content)
-            findings = verify_patches(result.findings, original_code=code, original_high_medium_checks=original_high_medium_checks)
+            findings = verify_patches(result.findings, original_code=code, original_high_medium_checks=original_high_medium_checks, allow_verification=slither_error is None)
             analysis_id = new_analysis_id()
             store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
             any_retry = any(getattr(f, "retry_available", False) for f in findings)
@@ -524,7 +546,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
                 "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
                 "slither_findings_count": len(slither_findings), "slither_error": slither_error,
                 "f1_ran": slither_error is None,
-                "pipeline_label": "F1 Slither → F2 Muse → F3 verify" if slither_error is None else "F2 only (static analysis unavailable)",
+                "pipeline_label": "F1 Slither → F2 Muse → F3 verify" if slither_error is None else MODEL_ONLY_PIPELINE,
                 "patches_verified_count": sum(1 for f in findings if getattr(f, "patch_verified", False)),
                 "patches_proposed_count": sum(1 for f in findings if getattr(f, "patched_code", None) and str(getattr(f, "patched_code")).strip()),
                 "patches_failed_count": sum(1 for f in findings if getattr(f, "patch_verification_status", None) == "failed"),
@@ -597,7 +619,8 @@ def retry_patch(analysis_id: str, request: Request):
         base.remaining_checks = []
         base.verification_error_kind = None
         updated.append(base)
-    updated = verify_patches(updated, original_code=original_code, original_high_medium_checks=original_high_medium_checks)
+    f1_ran = row.get("slither_error") is None
+    updated = verify_patches(updated, original_code=original_code, original_high_medium_checks=original_high_medium_checks, allow_verification=f1_ran)
     for f in updated:
         if f.retry_count >= MAX_PATCH_RETRIES:
             f.retry_available = False
@@ -607,8 +630,8 @@ def retry_patch(analysis_id: str, request: Request):
     return AuditResponse(summary=row.get("summary") or "", findings=updated, meta={
         "analysis_id": analysis_id, "model": RETRY_MODEL_NAME, "retry_model": RETRY_MODEL_NAME,
         "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
-        "slither_error": row.get("slither_error"), "f1_ran": row.get("slither_error") is None,
-        "pipeline_label": "F2 retry (Wonder) → F3 verify",
+        "slither_error": row.get("slither_error"), "f1_ran": f1_ran,
+        "pipeline_label": "F2 retry (Wonder) → F3 verify" if f1_ran else MODEL_ONLY_PIPELINE,
         "patches_verified_count": sum(1 for f in updated if f.patch_verified),
         "patches_proposed_count": sum(1 for f in updated if (f.patched_code or "").strip()),
         "patches_failed_count": sum(1 for f in updated if f.patch_verification_status == "failed"),

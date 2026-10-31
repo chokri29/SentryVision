@@ -74,7 +74,9 @@ flowchart TD
 
 **Presentation (alongside the pipeline):** finding cards with severity, plain language, and Mermaid diagrams. Reasoning-aware parsing validates Muse JSON with Pydantic and one repair retry.
 
-When F1 cannot run (compile failure, Slither unavailable, or Slither disabled), the UI meta line reports **Pipeline: F2 only (static analysis unavailable)** instead of implying a full F1 → F2 → F3 path.
+When F1 cannot run (unsupported import, compile failure, Slither unavailable, or Slither disabled), patches are **not** labeled verified. The UI meta line reports **Pipeline: Model only — not verified**.
+
+Known OpenZeppelin imports still go through Slither via small vendored stubs: `Ownable`, `ReentrancyGuard`, `Pausable` (v4 `security/` and v5 `utils/`), `ERC20`, `IERC20`, `SafeERC20`, `Address`, and `Context`. Other packages, relative files, and upgradeable contracts stay model-only. `Ownable` stub is the no-argument constructor (v4 style).
 
 ### Bounded self-heal (optional retry)
 
@@ -173,7 +175,7 @@ uvicorn main:app --reload --port 8000
 
 | UI signal | Meaning |
 | --- | --- |
-| Summary meta line | Counts + pipeline label (`F1 → F2 → F3`, or `F2 only` if Slither could not run) |
+| Summary meta line | Counts + pipeline label (`F1 → F2 → F3`, or **Model only — not verified** if Slither could not run) |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
 | Mermaid flowchart | Visual exploit path (presentation layer) |
 | **Patch verified by Slither** (green) | F3: no High/Medium left, and every original public/external function is still present (not a full audit) |
@@ -193,6 +195,8 @@ Optional: try **Access Control** and **Unchecked Call**. Source for every button
 | FastAPI + Muse Spark Open via Baseten (`/analyze`) | Done |
 | Bounded self-heal (`analysis_id`, max 1 retry) | Done |
 | Slither F1 + F3 in Docker | Done |
+| Known OpenZeppelin stubs so F1 still runs | Done |
+| pytest on push | Done |
 | UI status pills + honest Wonder labeling | Done |
 
 ## Limitations
