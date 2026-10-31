@@ -29,12 +29,12 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 
 1. The user pastes or uploads a `.sol` contract.
 2. **Slither** runs deterministic static detection (detector, impact, confidence, affected lines).
-3. **Muse Spark Open** (Meta's open-weights model) triages the findings: confirms real issues, ranks by exploitability, and explains each issue in plain language.
-4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid) for each confirmed finding.
-5. The model proposes a **patched version**, and **Slither re-runs on the patch** to check it. The result is labeled "Patch verified by Slither" or "Unverified patch".
-6. If F3 rejects the patch, the user can **retry once** (Muse Wonder when configured, else Spark) — still verified by Slither.
+3. **Muse Spark Open** triages the findings in plain language and proposes a patch.
+4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid).
+5. **Slither re-runs on the patch** and a **public signature surface check** runs.
+6. If F3 rejects the patch, the user can **retry once** (Muse Wonder when configured).
 
-**Core differentiation:** not just "find bugs", but *show how the hack would actually happen*, and check the fix with the same deterministic tool.
+**Core differentiation:** not just "find bugs", but *show how the hack would happen*, and check the fix with the same deterministic tool — without claiming a formal audit.
 
 ---
 
@@ -43,168 +43,79 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | Layer | Role | Engine |
 | --- | --- | --- |
 | **F1** | Deterministic static signal | Slither |
-| **F2** | Triage, plain-language explanation, patch proposal, Mermaid exploit flow | Muse Spark Open (`meta-models/muse-spark-open-1026`) via Baseten |
-| **F3** | Patch re-verification (Slither re-check) | Slither on proposed `patched_code` |
-| **Retry** (optional) | One user-triggered repair if F3 rejects the patch | Muse Wonder when `LLM_RETRY_MODEL` is set; otherwise Muse Spark |
+| **F2** | Triage, explanation, patch, Mermaid | Muse Spark Open via Baseten |
+| **F3** | Patch re-scan + surface check | Slither + signature surface |
+| **Retry** (optional) | One user-triggered repair if F3 rejects | Muse Wonder when `LLM_RETRY_MODEL` is set |
 
-```mermaid
-flowchart TD
-    A["Solidity contract (.sol)"] --> B["F1: Slither static analysis"]
-    B --> C["Slither JSON findings"]
-    C --> D["F2: Muse Spark Open triage"]
-    A --> D
-    D --> E["Structured JSON findings + Mermaid flows"]
-    E --> G["Finding cards"]
-    D --> H["Patch proposal"]
-    H --> I["F3: Sli ther re-verification"]
-    I --> G
-    I -->|"F3 rejected (user clicks Retry once)"| J["Optional: Muse Wonder repair"]
-    J --> I
-```
+### Verification claim (honest)
 
-### Verification Schema
+Green **Passed Slither re-scan + surface check** means:
 
-**F1 - Deterministic Detection:** Slither static analysis on the submitted `.sol` contract produces structured JSON findings.
+1. The patch **compiles** under the pinned solc.
+2. Slither reports **no Critical/High/Medium** on the patch.
+3. Every original **public/external signature** (plus `receive`/`fallback`) is still present.
 
-**F2 - Muse Spark Open Triage:** Meta Muse Spark Open reads both the contract and Slither findings and returns structured JSON findings, plain-language explanations, Mermaid exploit-flow diagrams, and optional patch proposals.
+It does **not** mean the contract is safe, that behaviour is preserved, or that Low/Informational issues are gone.
 
-**F3 - Patch verification:** proposed fixes are re-analyzed by Slither before they are labeled verified.
+### Vendored OpenZeppelin (subset)
 
-**Optional retry - Muse Wonder:** if F3 rejects a real patch, the user can trigger **one** repair pass (Muse Wonder when configured). The new patch is still subject to F3.
-
-**Presentation (alongside the pipeline):** finding cards with severity, plain language, and Mermaid diagrams. Reasoning-aware parsing validates Muse JSON with Pydantic and one repair retry.
-
-When F1 cannot run (unsupported import, compile failure, Slither unavailable, or Slither disabled), patches are **not** labeled verified. The UI meta line reports **Pipeline: Model only — not verified**.
-
-Known OpenZeppelin imports still go through Slither via small vendored stubs: `Ownable`, `ReentrancyGuard`, `Pausable` (v4 `security/` and v5 `utils/`), `ERC20`, `IERC20`, `SafeERC20`, `Address`, and `Context`. Other packages, relative files, and upgradeable contracts stay model-only. `Ownable` stub is the no-argument constructor (v4 style).
+F1 can resolve a **small** set of `@openzeppelin/contracts/...` imports via `vendor/openzeppelin/` stubs aimed at **OZ 4.9.6** semantics (compatible with default solc **0.8.20**). This is **not** full OpenZeppelin — especially ERC20/SafeERC20 may diverge from production OZ. Unknown imports fall closed: pipeline is labeled **model-only, not verified**. Do not floating-install OZ 5.x (breaking `Ownable` constructor). Expand the stub set only on demand.
 
 ### Bounded self-heal (optional retry)
 
-When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
+When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface_removed`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
 
 | Piece | Behavior |
 | --- | --- |
 | **Trigger** | User clicks **Retry patch once** (never auto) |
-| **Server state** | `meta.analysis_id` — original source + findings stored in memory (~1h TTL) |
+| **Server state** | `meta.analysis_id` — original source + findings in memory (~1h TTL) |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
-| **Cap** | `MAX_PATCH_RETRIES=1` enforced server-side |
+| **Cap** | `MAX_PATCH_RETRIES=1` server-side |
 | **Default model** | Muse Spark (same as F2) |
-| **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` to a Muse Wonder id — pill turns green only when configured |
+| **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` |
 
-Retry does **not** run on identical patches, empty patches, or pure infra failures (`timeout` / `slither_unavailable`). Invalid retry JSON does not burn the one attempt. Verified means Slither reports no High/Medium issue **and** the original public functions are still there — not “safe to deploy.” Deleting an entry point is `surface_removed` and can be retried once.
+Retry does **not** run on identical patches, empty patches, or pure infra failures. Verified still means the claim above — not "safe to deploy."
 
 ## Meta models used
 
-- **Muse Spark Open** (`meta-models/muse-spark-open-1026`) — default F2 triage / patch proposal (Baseten OpenAI-compatible API).
-- **Muse Wonder** (optional) — stronger one-shot repair on user-triggered retry when `LLM_RETRY_MODEL` is set.
-- **Development:** Muse tools were also used as coding assistants while building this project.
-
----
+- **Muse Spark Open** — default F2 triage / patch proposal.
+- **Muse Wonder** (optional) — stronger one-shot repair on user-triggered retry.
 
 ## Tech stack
 
-- **Core AI Engine:** Meta Muse Spark Open via Baseten Inference (optional Muse Wonder on self-heal retry)
-- **Static Analysis:** [Slither](https://github.com/crytic/slither) with `solc-select` (Docker image)
-- **Backend:** Python, FastAPI, Pydantic
-- **Frontend:** HTML / JavaScript with [Mermaid.js](https://mermaid.js.org/)
-- **Deployment:** Render (Docker)
-
----
+- Meta Muse Spark Open via Baseten (optional Muse Wonder on retry)
+- [Slither](https://github.com/crytic/slither) + `solc-select` (Docker)
+- Python, FastAPI, Pydantic
+- HTML / JS + [Mermaid.js](https://mermaid.js.org/)
+- Render (Docker)
 
 ## Getting started
-
-### Prerequisites
-
-- Python 3.10+ **or** Docker
-- Baseten API key for Muse Spark Open
-
-### Setup (local Python)
 
 ```bash
 git clone https://github.com/chokri29/SentryVision.git
 cd SentryVision
-
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Configuration
-
-```bash
-cp .env.example .env
-```
-
-```env
-LLM_API_KEY=your_baseten_api_key
-LLM_BASE_URL=https://inference.baseten.co/v1
-LLM_MODEL=meta-models/muse-spark-open-1026
-# Optional: Muse Wonder for the single self-heal retry
-# LLM_RETRY_MODEL=meta-models/<muse-wonder-id>
-ENABLE_SLITHER=true
-ALLOWED_ORIGINS=http://localhost:8000
-```
-
-**Never commit `.env`.** On Render, set the same variables in the service dashboard.
-
-### Run
-
-```bash
-# Docker (recommended — includes solc + Slither)
+cp .env.example .env   # set LLM_API_KEY, optional LLM_RETRY_MODEL
 docker build -t sentryvision .
 docker run --rm -p 8000:8000 --env-file .env sentryvision
-
-# Or local (Slither optional if installed)
-uvicorn main:app --reload --port 8000
 ```
 
 - UI: http://localhost:8000
 - Health: `GET /health`
-- API: `POST /analyze` with `{ "solidity_code": "..." }`
-- Retry: `POST /analyze/{analysis_id}/retry-patch` (max 1; requires prior `/analyze`)
+- Analyze: `POST /analyze`
+- Retry: `POST /analyze/{analysis_id}/retry-patch` (max 1)
 
----
+## Demo for judges
 
-## Demo for judges (3 clicks)
-
-1. Open the live app (or `http://localhost:8000` after Docker/local start).
-2. Click **Reentrancy** (same source as [`examples/01_reentrancy.sol`](examples/01_reentrancy.sol)).
-3. Click **Run Meta-assisted Audit**.
-
-**What to look for**
-
-| UI signal | Meaning |
-| --- | --- |
-| Summary meta line | Counts + pipeline label (`F1 → F2 → F3`, or **Model only — not verified** if Slither could not run) |
-| Finding severity + plain language | F2 Muse triage grounded in F1 |
-| Mermaid flowchart | Visual exploit path (presentation layer) |
-| **Patch verified by Slither** (green) | F3: no High/Medium left, and every original public/external function is still present (not a full audit) |
-| **Patch removed public functions** | F3: Slither went quiet because an entry point was deleted — not a fix |
-| **Patch failed Slither re-check** | F3 rejected the proposed fix — verification can say no |
-| **Fix proposed** | Muse returned a full patched contract |
-| **Retry patch once** (amber bar) | F3 failed → one user-triggered repair + F3 again |
-
-Optional: try **Access Control** and **Unchecked Call**. Source for every button lives under [`examples/`](examples/) so judges can open the same files in the repo.
-
----
-
-## Project status
-
-| Item | Status |
-| --- | --- |
-| FastAPI + Muse Spark Open via Baseten (`/analyze`) | Done |
-| Bounded self-heal (`analysis_id`, max 1 retry) | Done |
-| Slither F1 + F3 in Docker | Done |
-| Known OpenZeppelin stubs so F1 still runs | Done |
-| pytest on push | Done |
-| UI status pills + honest Wonder labeling | Done |
+1. Open the live app.
+2. Click **Reentrancy** → **Run Meta-assisted Audit**.
+3. Look for pipeline label, findings, Mermaid, and the green **Passed Slither re-scan + surface check** badge (or an honest failure / model-only label).
 
 ## Limitations
 
-- Not a substitute for a professional audit.
-- F3 “verified” means Slither reports no High/Medium issue and the patch kept the original public/external surface (functions, receive, fallback). It is not a proof of safety. A rewrite that keeps the function but hides the bug can still pass.
-- Retry state is **in-memory** (lost on restart / multi-instance).
-- Multi-file repos and agentic tool loops are out of scope for this demo.
+- Not a professional audit.
+- F3 claim is detector-scoped + signature surface — not behavioural equivalence.
+- OZ support is a **vendored subset** (4.9.6-oriented), not full OZ.
+- Retry store is in-memory.
 
 ## License
 
