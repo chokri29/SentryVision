@@ -19,56 +19,25 @@ logger = logging.getLogger("sentryvision.slither")
 
 SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
+    "1", "true", "yes", "on",
 }
 DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20")
 
 KEEP_IMPACTS = {"High", "Medium", "Critical"}
 
 PRIORITY_CHECKS = {
-    "reentrancy-eth",
-    "reentrancy-no-eth",
-    "reentrancy-benign",
-    "reentrancy-events",
-    "reentrancy-unlimited-gas",
-    "controlled-delegatecall",
-    "delegatecall-loop",
-    "unchecked-lowlevel",
-    "unchecked-send",
-    "arbitrary-send-eth",
-    "arbitrary-send-erc20",
-    "suicidal",
-    "tx-origin",
-    "unprotected-upgrade",
-    "locked-ether",
-    "void-cst",
-    "rtlo",
-    "shadowing-state",
-    "uninitialized-state",
-    "uninitialized-storage",
-    "uninitialized-local",
-    "arbitrary-send",
-    "controlled-array-length",
-    "msg-value-loop",
+    "reentrancy-eth", "reentrancy-no-eth", "reentrancy-benign", "reentrancy-events",
+    "reentrancy-unlimited-gas", "controlled-delegatecall", "delegatecall-loop",
+    "unchecked-lowlevel", "unchecked-send", "arbitrary-send-eth", "arbitrary-send-erc20",
+    "suicidal", "tx-origin", "unprotected-upgrade", "locked-ether", "void-cst", "rtlo",
+    "shadowing-state", "uninitialized-state", "uninitialized-storage", "uninitialized-local",
+    "arbitrary-send", "controlled-array-length", "msg-value-loop",
 }
 
 DROP_CHECKS = {
-    "naming-convention",
-    "solc-version",
-    "pragma",
-    "external-function",
-    "low-level-calls",
-    "too-many-digits",
-    "constable-states",
-    "immutable-states",
-    "var-read-using-this",
-    "dead-code",
-    "unused-state",
-    "unused-return",
-    "similar-names",
+    "naming-convention", "solc-version", "pragma", "external-function", "low-level-calls",
+    "too-many-digits", "constable-states", "immutable-states", "var-read-using-this",
+    "dead-code", "unused-state", "unused-return", "similar-names",
 }
 
 
@@ -76,12 +45,7 @@ def is_slither_available() -> bool:
     if not ENABLE_SLITHER:
         return False
     try:
-        result = subprocess.run(
-            ["slither", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        result = subprocess.run(["slither", "--version"], capture_output=True, text=True, timeout=10)
         return result.returncode == 0
     except Exception:
         return False
@@ -98,7 +62,6 @@ def _safe_filename(contract_name: str) -> str:
 
 
 def _normalize_pragma(source_code: str, version: Optional[str] = None) -> str:
-    """Pin pragma to an exact installed solc version so crytic-compile succeeds."""
     ver = version or DEFAULT_SOLC
     pinned = f"pragma solidity {ver};"
     if re.search(r"pragma\s+solidity\s+[^;]+;", source_code):
@@ -107,76 +70,53 @@ def _normalize_pragma(source_code: str, version: Optional[str] = None) -> str:
 
 
 def _extract_solc_version(source_code: str) -> str:
-    """Pick a concrete solc version that satisfies the pragma when possible.
-
-    Carets / ranges like ^0.8.0 must NOT select the floor (0.8.0) while we pin
-    the source to DEFAULT_SOLC (0.8.20) — that mismatch is the live compile error.
-    """
     m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if not m:
         return DEFAULT_SOLC
     spec = m.group(1).strip()
-
-    # Exact pin: pragma solidity 0.8.20;
     exact = re.fullmatch(r"(\d+\.\d+\.\d+)", spec)
     if exact:
         return exact.group(1)
-
-    # Caret / >= / > ranges on 0.8.x → prefer DEFAULT_SOLC (installed & stable)
     if re.search(r"[\^>=~]", spec) and "0.8." in spec:
         return DEFAULT_SOLC
-
     nums = re.findall(r"\d+\.\d+\.\d+", spec)
     if nums:
         if any(n.startswith("0.8.") for n in nums):
             return DEFAULT_SOLC
         return nums[-1]
-
     nums2 = re.findall(r"\d+\.\d+", spec)
     if nums2:
         major_minor = nums2[-1]
         if major_minor.startswith("0.8"):
             return DEFAULT_SOLC
         return major_minor + ".0"
-
     return DEFAULT_SOLC
 
 
 def _try_set_solc_version(version: str) -> str:
-    """Activate solc via solc-select; fall back to DEFAULT_SOLC. Returns version used."""
     candidates = []
     for v in (version, DEFAULT_SOLC, "0.8.20", "0.8.19", "0.8.17"):
         if v and v not in candidates:
             candidates.append(v)
-
     last_err = None
     for ver in candidates:
         try:
             proc = subprocess.run(
                 ["solc-select", "use", ver, "--always-install"],
-                capture_output=True,
-                text=True,
-                timeout=90,
-                check=False,
+                capture_output=True, text=True, timeout=90, check=False,
             )
-            check = subprocess.run(
-                ["solc", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
+            check = subprocess.run(["solc", "--version"], capture_output=True, text=True, timeout=15)
             out = (check.stdout or "") + (check.stderr or "")
             if check.returncode == 0 and ver in out.replace("v", ""):
                 logger.info("solc-select active: %s", ver)
                 return ver
             if proc.returncode == 0 and check.returncode == 0:
-                logger.info("solc-select use %s (version string: %s)", ver, out.strip()[:80])
+                logger.info("solc-select use %s (%s)", ver, out.strip()[:80])
                 return ver
             last_err = (proc.stderr or proc.stdout or out or "")[:200]
         except Exception as exc:
             last_err = str(exc)
-            logger.warning("solc-select failed for %s: %s", ver, exp)
-
+            logger.warning("solc-select failed for %s: %s", ver, exc)
     logger.warning("Could not activate solc; last error: %s", last_err)
     return version or DEFAULT_SOLC
 
@@ -187,39 +127,21 @@ def _short_error(text: str, limit: int = 240) -> str:
         return "unknown error"
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     for ln in reversed(lines):
-        if any(
-            k in ln
-            for k in (
-                "InvalidCompilation",
-                "CompilerError",
-                "ParserError",
-                "TypeError",
-                "DeclarationError",
-            )
-        ):
+        if any(k in ln for k in ("InvalidCompilation", "CompilerError", "ParserError", "TypeError", "DeclarationError")):
             return ln[:limit]
     return (lines[-1] if lines else text)[:limit]
 
 
 def _classify_slither_error(error: Optional[str]) -> str:
-    """Map Slither/solc failure text → verification_error_kind."""
     text = (error or "").lower()
     if not text:
         return "execution_error"
     if "timed out" in text or "timeout" in text:
         return "timeout"
     compile_markers = (
-        "invalidcompilation",
-        "compilererror",
-        "compilation failed",
-        "compile",
-        "parsererror",
-        "solc",
-        "source file requires different compiler",
-        "not found: file",
-        "declarationerror",
-        "typeerror",
-        "syntax error",
+        "invalidcompilation", "compilererror", "compilation failed", "compile",
+        "parsererror", "solc", "source file requires different compiler",
+        "not found: file", "declarationerror", "typeerror", "syntax error",
     )
     if any(marker in text for marker in compile_markers):
         return "compile_failed"
@@ -258,18 +180,10 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
         return None
     if not source_code or not source_code.strip():
         return {
-            "success": False,
-            "detectors": [],
-            "filtered_detectors": [],
-            "detector_checks": [],
-            "count": 0,
-            "filtered_count": 0,
-            "raw": None,
-            "error": "Empty source",
-            "error_kind": "compile_failed",
+            "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+            "count": 0, "filtered_count": 0, "raw": None, "error": "Empty source", "error_kind": "compile_failed",
         }
 
-    # Critical: select solc AND pin pragma to the SAME version (avoids 0.8.0 vs 0.8.20 mismatch)
     solc_ver = _extract_solc_version(source_code)
     solc_ver = _try_set_solc_version(solc_ver)
     source = _normalize_pragma(source_code, version=solc_ver)
@@ -284,50 +198,29 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
         try:
             proc = subprocess.run(
                 ["slither", str(sol_file), "--json", str(out_file)],
-                capture_output=True,
-                text=True,
-                timeout=SLITHER_TIMEOUT,
-                cwd=str(tmp_path),
+                capture_output=True, text=True, timeout=SLITHER_TIMEOUT, cwd=str(tmp_path),
             )
         except subprocess.TimeoutExpired:
             return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": None,
-                "error": f"Slither timed out after {SLITHER_TIMEOUT}s",
-                "error_kind": "timeout",
+                "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+                "count": 0, "filtered_count": 0, "raw": None,
+                "error": f"Slither timed out after {SLITHER_TIMEOUT}s", "error_kind": "timeout",
             }
         except Exception as exc:
             err = str(exc)
             return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": None,
-                "error": err,
-                "error_kind": _classify_slither_error(err),
+                "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+                "count": 0, "filtered_count": 0, "raw": None,
+                "error": err, "error_kind": _classify_slither_error(err),
             }
 
         if not out_file.exists():
             raw_err = proc.stderr or proc.stdout or "Slither produced no JSON output"
             err = _short_error(raw_err)
             return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": None,
-                "error": err,
-                "error_kind": _classify_slither_error(err),
+                "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+                "count": 0, "filtered_count": 0, "raw": None,
+                "error": err, "error_kind": _classify_slither_error(err),
             }
 
         try:
@@ -335,29 +228,17 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
         except Exception as exc:
             err = f"Invalid Slither JSON: {exc}"
             return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": None,
-                "error": err,
-                "error_kind": "execution_error",
+                "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+                "count": 0, "filtered_count": 0, "raw": None,
+                "error": err, "error_kind": "execution_error",
             }
 
         if not raw.get("success", True):
             err = _short_error(str(raw.get("error") or "Compilation failed"))
             return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": raw,
-                "error": err,
-                "error_kind": _classify_slither_error(err) if err else "compile_failed",
+                "success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [],
+                "count": 0, "filtered_count": 0, "raw": raw,
+                "error": err, "error_kind": _classify_slither_error(err) if err else "compile_failed",
             }
 
         detectors = _normalize_detectors(raw)
@@ -400,9 +281,7 @@ def verify_patch(
             "patch_verified": False,
             "patch_verification_status": "slither_unavailable",
             "verification_error_kind": "slither_unavailable",
-            "patch_verification_details": (
-                "Patch generated by Muse Spark, awaiting Slither re-verification."
-            ),
+            "patch_verification_details": "Patch generated by Muse Spark, awaiting Slither re-verification.",
             "remaining_checks": [],
         }
 
@@ -413,9 +292,7 @@ def verify_patch(
             "patch_verified": False,
             "patch_verification_status": "failed",
             "verification_error_kind": kind,
-            "patch_verification_details": (
-                "Could not compile/verify patch with Slither: " + err
-            ),
+            "patch_verification_details": "Could not compile/verify patch with Slither: " + err,
             "remaining_checks": [],
         }
 
@@ -428,19 +305,14 @@ def verify_patch(
                 "patch_verified": False,
                 "patch_verification_status": "failed",
                 "verification_error_kind": None,
-                "patch_verification_details": (
-                    "Patch still triggers Slither detectors: "
-                    + ", ".join(still_present)
-                ),
+                "patch_verification_details": "Patch still triggers Slither detectors: " + ", ".join(still_present),
                 "remaining_checks": remaining,
             }
         return {
             "patch_verified": True,
             "patch_verification_status": "verified",
             "verification_error_kind": None,
-            "patch_verification_details": (
-                "Slither re-analysis confirms target vulnerability is no longer detected."
-            ),
+            "patch_verification_details": "Slither re-analysis confirms target vulnerability is no longer detected.",
             "remaining_checks": remaining,
         }
 
@@ -454,10 +326,7 @@ def verify_patch(
             "patch_verified": False,
             "patch_verification_status": "failed",
             "verification_error_kind": None,
-            "patch_verification_details": (
-                "Patch still has High/Medium Slither findings: "
-                + ", ".join(sorted(set(high_medium)))
-            ),
+            "patch_verification_details": "Patch still has High/Medium Slither findings: " + ", ".join(sorted(set(high_medium))),
             "remaining_checks": remaining,
         }
 
@@ -465,8 +334,6 @@ def verify_patch(
         "patch_verified": True,
         "patch_verification_status": "verified",
         "verification_error_kind": None,
-        "patch_verification_details": (
-            "Slither re-analysis found no High/Medium vulnerabilities in patched code."
-        ),
+        "patch_verification_details": "Slither re-analysis found no High/Medium vulnerabilities in patched code.",
         "remaining_checks": remaining,
     }
