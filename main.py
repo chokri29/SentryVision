@@ -47,14 +47,16 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sentryvision")
 
+# F2: Muse Spark Open served by Baseten.
 API_KEY = os.getenv("LLM_API_KEY")
 BASE_URL = os.getenv("LLM_BASE_URL", "https://inference.baseten.co/v1")
 MODEL_NAME = os.getenv("LLM_MODEL") or os.getenv("LLM_MODEL_ID", "meta-models/muse-spark-open-1026")
-RETRY_MODEL_NAME = (
-    os.getenv("LLM_RETRY_MODEL")
-    or os.getenv("LLM_WONDER_MODEL")
-    or MODEL_NAME
-)
+
+# Optional self-heal retry: Muse Wonder through Meta Model API.
+# Deliberately separate credentials/client: never fall back to the Baseten key.
+RETRY_API_KEY = os.getenv("LLM_RETRY_API_KEY")
+RETRY_BASE_URL = os.getenv("LLM_RETRY_BASE_URL", "https://api.meta.ai/v1")
+RETRY_MODEL_NAME = os.getenv("LLM_RETRY_MODEL", "muse-wonder-1.0")
 RETRY_TIMEOUT_SECONDS = int(os.getenv("LLM_RETRY_TIMEOUT_SECONDS", "90"))
 MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8000"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
@@ -79,25 +81,35 @@ MAX_CODE_CHARS = 60000
 
 
 class LazyOpenAIClient:
-    def __init__(self):
+    """Lazily construct an OpenAI-compatible client for one provider."""
+
+    def __init__(self, *, api_key: Optional[str], base_url: Optional[str], key_env_name: str):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.key_env_name = key_env_name
         self._client = None
 
     def _ensure(self):
         missing = []
-        if not API_KEY:
-            missing.append("LLM_API_KEY")
-        if not BASE_URL:
-            missing.append("LLM_BASE_URL")
-        if not MODEL_NAME:
-            missing.append("LLM_MODEL")
+        if not self.api_key:
+            missing.append(self.key_env_name)
+        if not self.base_url:
+            missing.append("provider base URL")
         if missing:
             raise RuntimeError(f"Missing env var(s): {', '.join(missing)}")
         if self._client is None:
-            self._client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return self._client
 
 
-client = LazyOpenAIClient()
+# Separate clients are intentional: F2 must never send the Baseten key to Meta,
+# and the optional Wonder retry must never silently fall back to Baseten.
+client = LazyOpenAIClient(api_key=API_KEY, base_url=BASE_URL, key_env_name="LLM_API_KEY")
+retry_client = LazyOpenAIClient(
+    api_key=RETRY_API_KEY,
+    base_url=RETRY_BASE_URL,
+    key_env_name="LLM_RETRY_API_KEY",
+)
 
 app = FastAPI(title="SentryVision", version="0.3.0")
 app.add_middleware(
@@ -501,7 +513,7 @@ async def serve_frontend():
 async def health():
     available = is_slither_available()
     _prune_analysis_store()
-    wonder_configured = RETRY_MODEL_NAME != MODEL_NAME or "wonder" in (RETRY_MODEL_NAME or "").lower()
+    wonder_configured = bool(RETRY_API_KEY and RETRY_MODEL_NAME)
     return {
         "status": "ok",
         "model": MODEL_NAME,
@@ -511,6 +523,7 @@ async def health():
         "analysis_store_size": len(analysis_store),
         "max_patch_retries": MAX_PATCH_RETRIES,
         "retry_model": RETRY_MODEL_NAME,
+        "retry_provider": "Meta Model API",
         "wonder_configured": wonder_configured,
     }
 
@@ -586,9 +599,13 @@ def retry_patch(analysis_id: str, request: Request):
     if not targets:
         raise HTTPException(status_code=400, detail="No findings are eligible for retry on this analysis.")
     try:
-        model_client = client._ensure()
+        model_client = retry_client._ensure()
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail="Server is not configured correctly.") from exc
+        logger.warning("Muse Wonder retry is not configured: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Muse Wonder retry is not configured. Set LLM_RETRY_API_KEY in the service environment.",
+        ) from exc
     original_code = row["original_code"]
     original_high_medium_checks = row.get("original_high_medium_checks") or []
     messages = build_retry_messages(original_code=original_code, findings_rows=targets)
