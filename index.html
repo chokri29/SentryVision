@@ -384,7 +384,7 @@
       if (msg) {
         msg.textContent = 'One or more patches failed Slither re-check. Retry once with ' +
           (wonderConfigured ? 'Muse Wonder' : 'a stronger repair pass') +
-          ' (' + count + '/' + maxR + ' used). Verified ≠ fully safe.';
+          ' (' + count + '/' + maxR + ' used). Passed checks ≠ fully safe.';
       }
       btn.disabled = false; btn.textContent = 'Retry patch once';
       bar.classList.add('visible');

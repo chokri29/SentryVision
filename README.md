@@ -12,7 +12,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
-- **Sentry Vision combines them:** Slither detects, Muse Spark Open interprets and visualizes, Slither verifies the fix, and optional Muse Wonder retries a rejected patch once.
+- **Sentry Vision combines them:** Slither detects, Muse Spark Open interprets and visualizes, Slither re-checks the proposed fix, and optional Muse Wonder retries a rejected patch once.
 
 ---
 
@@ -60,7 +60,7 @@ It does **not** mean the contract is safe, that behaviour is preserved, or that 
 
 ### Vendored OpenZeppelin (subset)
 
-F1 can resolve a **small** set of `@openzeppelin/contracts/...` imports via `vendor/openzeppelin/` stubs aimed at **OZ 4.9.6** semantics (compatible with default solc **0.8.20**). This is **not** full OpenZeppelin — especially ERC20/SafeERC20 may diverge from production OZ. Unknown imports fall closed: pipeline is labeled **model-only, not verified**. Do not floating-install OZ 5.x (breaking `Ownable` constructor). Expand the stub set only on demand.
+F1 can resolve only the documented `SUPPORTED_OZ_IMPORTS` list through `vendor/openzeppelin/`, a **vendored OZ subset** of hand-written stubs. The stubs use **pre-5.0 style** patterns but are not a copy of a specific upstream version, are not audited upstream code, and are not claimed equivalent to real OZ. Unknown imports fail closed to **Model-only result — not verified**. Expand the supported list only on demand.
 
 ### Bounded self-heal (optional retry)
 
@@ -75,7 +75,7 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | **Default model** | Muse Spark (same as F2) |
 | **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` |
 
-Retry does **not** run on identical patches, empty patches, or pure infra failures. Verified still means the claim above — not "safe to deploy."
+Retry does **not** run on identical patches, empty patches, or pure infra failures. The pass label means only the claim above — not "safe to deploy."
 
 ## Meta models used
 
