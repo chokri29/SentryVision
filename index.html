@@ -142,7 +142,7 @@
         <span class="status-pill model checking" id="pillModel"><span class="dot"></span><span class="label">Spark</span><span class="value" id="pillModelValue">…</span></span>
         <span class="status-pill wonder checking" id="pillWonder"><span class="dot"></span><span class="label">Wonder</span><span class="value" id="pillWonderValue">…</span></span>
       </div>
-      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Patch verified by Slither</em> means Slither no longer reports High/Medium issues on that patch — not that the contract is fully safe.</p>
+      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Patch verified by Slither</em> means no High/Medium findings remain and every original public function is still there — not that the contract is fully safe. Deleting a function to silence Slither is rejected.</p>
     </header>
     <section class="panel">
       <div class="samples">
@@ -291,6 +291,7 @@
       if (failureKind === 'compile_failed') return 'Patch failed to compile';
       if (failureKind === 'still_vulnerable') return 'Still vulnerable';
       if (failureKind === 'regression_introduced') return 'New issue introduced';
+      if (failureKind === 'surface_removed') return 'Patch removed public functions';
       if (failureKind === 'model_no_patch') return 'No patch produced';
       if (s === 'failed') return 'Patch failed Slither re-check';
       return 'Patch not checked';

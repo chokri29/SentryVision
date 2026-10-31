@@ -260,11 +260,161 @@ def run_slither_on_code(source_code: str, contract_name: str = "Contract.sol") -
     return run_slither(source_code, contract_name)
 
 
+def _strip_solidity(source: str) -> str:
+    """Drop comments and string literals so function scans do not see decoys."""
+    out: List[str] = []
+    i = 0
+    n = len(source)
+    while i < n:
+        if source.startswith("//", i):
+            j = source.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if source.startswith("/*", i):
+            j = source.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if source[i] in "\"'":
+            quote = source[i]
+            i += 1
+            while i < n:
+                if source[i] == "\\":
+                    i += 2
+                    continue
+                if source[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            out.append(" ")
+            continue
+        out.append(source[i])
+        i += 1
+    return "".join(out)
+
+
+def _match_brace(source: str, open_idx: int) -> int:
+    depth = 0
+    for i in range(open_idx, len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _match_paren(source: str, open_idx: int) -> int:
+    depth = 0
+    for i in range(open_idx, len(source)):
+        if source[i] == "(":
+            depth += 1
+        elif source[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _blank_assembly(body: str) -> str:
+    chars = list(body)
+    for match in re.finditer(r"\bassembly\b", body):
+        brace = body.find("{", match.end())
+        if brace < 0:
+            continue
+        end = _match_brace(body, brace)
+        if end < 0:
+            continue
+        for i in range(match.start(), end + 1):
+            if chars[i] != "\n":
+                chars[i] = " "
+    return "".join(chars)
+
+
+def _header_after_params(body: str, paren_open: int) -> tuple[str, str]:
+    close = _match_paren(body, paren_open)
+    if close < 0:
+        return "", ""
+    depth = 0
+    for i in range(close + 1, len(body)):
+        char = body[i]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0 and char in "{;":
+            return body[close + 1:i], ("body" if char == "{" else "decl")
+    return "", ""
+
+
+def _is_public_header(header: str) -> bool:
+    match = re.search(r"\b(public|external|internal|private)\b", header)
+    return bool(match and match.group(1) in {"public", "external"})
+
+
+def public_entry_points(source_code: str) -> List[str]:
+    """Names of implemented public/external functions, plus receive and fallback.
+
+    Contract renames are ignored. Names are not qualified, so a full-file
+    rewrite that keeps `withdraw` still passes. Deleting it, or changing it
+    from public/external to internal/private, does not.
+    """
+    if not source_code or not source_code.strip():
+        return []
+    cleaned = _strip_solidity(source_code)
+    names: set[str] = set()
+    for match in re.finditer(r"\b(contract|library|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b", cleaned):
+        if match.group(1) == "interface":
+            continue
+        brace = cleaned.find("{", match.end())
+        if brace < 0:
+            continue
+        end = _match_brace(cleaned, brace)
+        if end < 0:
+            continue
+        body = _blank_assembly(cleaned[brace + 1:end])
+        for func in re.finditer(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", body):
+            header, kind = _header_after_params(body, func.end() - 1)
+            if kind == "body" and _is_public_header(header):
+                names.add(func.group(1))
+        for keyword in ("receive", "fallback"):
+            for special in re.finditer(rf"\b{keyword}\s*\(", body):
+                header, kind = _header_after_params(body, special.end() - 1)
+                if kind == "body" and _is_public_header(header):
+                    names.add(keyword)
+    return sorted(names)
+
+
+def surface_gap(original_code: str, patched_code: str) -> List[str]:
+    """Public entry points present on the original and missing from the patch."""
+    original = public_entry_points(original_code)
+    if not original:
+        return []
+    patched = set(public_entry_points(patched_code))
+    return sorted(set(original) - patched)
+
+
+def high_medium_check_names(detectors: list) -> List[str]:
+    return sorted({
+        d["check"]
+        for d in detectors
+        if d.get("impact") in KEEP_IMPACTS and d.get("check")
+    })
+
+
 def verify_patch(
     patched_code: str,
     target_checks: Optional[List[str]] = None,
     contract_name: str = "Patched.sol",
+    original_entry_points: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    """Re-scan a proposed patch.
+
+    Verified requires both: no Critical/High/Medium detectors, and every
+    original public entry point still implemented. `target_checks` must not
+    short-circuit that. A quiet Slither run after deleting `withdraw` is
+    `surface_removed`, not verified.
+    """
     if not patched_code or not patched_code.strip():
         return {
             "patch_verified": False,
@@ -272,6 +422,7 @@ def verify_patch(
             "verification_error_kind": None,
             "patch_verification_details": "No patched code provided.",
             "remaining_checks": [],
+            "surface_removed": [],
         }
 
     result = run_slither(patched_code, contract_name)
@@ -283,6 +434,7 @@ def verify_patch(
             "verification_error_kind": "slither_unavailable",
             "patch_verification_details": "Patch generated by Muse Spark, awaiting Slither re-verification.",
             "remaining_checks": [],
+            "surface_removed": [],
         }
 
     if not result.get("success"):
@@ -294,46 +446,59 @@ def verify_patch(
             "verification_error_kind": kind,
             "patch_verification_details": "Could not compile/verify patch with Slither: " + err,
             "remaining_checks": [],
+            "surface_removed": [],
         }
 
-    remaining = result.get("detector_checks") or []
+    high_medium = high_medium_check_names(result.get("detectors") or [])
+    missing: List[str] = []
+    if original_entry_points:
+        patched_surface = set(public_entry_points(patched_code))
+        missing = sorted(set(original_entry_points) - patched_surface)
+
+    if high_medium:
+        details = "Patch still has High/Medium Slither findings: " + ", ".join(high_medium)
+        if missing:
+            details += ". Also removed public functions: " + ", ".join(missing)
+        return {
+            "patch_verified": False,
+            "patch_verification_status": "failed",
+            "verification_error_kind": None,
+            "patch_verification_details": details,
+            "remaining_checks": high_medium,
+            "surface_removed": missing,
+        }
+
+    if missing:
+        return {
+            "patch_verified": False,
+            "patch_verification_status": "failed",
+            "verification_error_kind": None,
+            "patch_verification_details": (
+                "Slither reports no High/Medium issues, but public functions were removed: "
+                + ", ".join(missing)
+                + ". Deleting an entry point is not a fix."
+            ),
+            "remaining_checks": [],
+            "surface_removed": missing,
+        }
 
     if target_checks:
-        still_present = [c for c in target_checks if c in remaining]
+        still_present = [c for c in target_checks if c in (result.get("detector_checks") or [])]
         if still_present:
             return {
                 "patch_verified": False,
                 "patch_verification_status": "failed",
                 "verification_error_kind": None,
                 "patch_verification_details": "Patch still triggers Slither detectors: " + ", ".join(still_present),
-                "remaining_checks": remaining,
+                "remaining_checks": [c for c in still_present if c in high_medium],
+                "surface_removed": [],
             }
-        return {
-            "patch_verified": True,
-            "patch_verification_status": "verified",
-            "verification_error_kind": None,
-            "patch_verification_details": "Slither re-analysis confirms target vulnerability is no longer detected.",
-            "remaining_checks": remaining,
-        }
-
-    high_medium = [
-        d["check"]
-        for d in (result.get("detectors") or [])
-        if d.get("impact") in ("High", "Medium", "Critical") and d.get("check")
-    ]
-    if high_medium:
-        return {
-            "patch_verified": False,
-            "patch_verification_status": "failed",
-            "verification_error_kind": None,
-            "patch_verification_details": "Patch still has High/Medium Slither findings: " + ", ".join(sorted(set(high_medium))),
-            "remaining_checks": remaining,
-        }
 
     return {
         "patch_verified": True,
         "patch_verification_status": "verified",
         "verification_error_kind": None,
-        "patch_verification_details": "Slither re-analysis found no High/Medium vulnerabilities in patched code.",
-        "remaining_checks": remaining,
+        "patch_verification_details": "Slither re-analysis found no High/Medium issues, and the public function surface is unchanged.",
+        "remaining_checks": [],
+        "surface_removed": [],
     }

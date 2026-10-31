@@ -89,7 +89,7 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, or `regr
 | **Default model** | Muse Spark (same as F2) |
 | **Optional Wonder** | Set `LLM_RETRY_MODEL` / `LLM_WONDER_MODEL` to a Muse Wonder id — pill turns green only when configured |
 
-Retry does **not** run on identical patches, empty patches, or pure infra failures (`timeout` / `slither_unavailable`). Invalid retry JSON does not burn the one attempt. Verified still means “Slither no longer reports that High/Medium issue,” not “safe to deploy.”
+Retry does **not** run on identical patches, empty patches, or pure infra failures (`timeout` / `slither_unavailable`). Invalid retry JSON does not burn the one attempt. Verified means Slither reports no High/Medium issue **and** the original public functions are still there — not “safe to deploy.” Deleting an entry point is `surface_removed` and can be retried once.
 
 ## Meta models used
 
@@ -176,7 +176,8 @@ uvicorn main:app --reload --port 8000
 | Summary meta line | Counts + pipeline label (`F1 → F2 → F3`, or `F2 only` if Slither could not run) |
 | Finding severity + plain language | F2 Muse triage grounded in F1 |
 | Mermaid flowchart | Visual exploit path (presentation layer) |
-| **Patch verified by Slither** (green) | F3: Sli ther no longer reports High/Medium on that patch (not a full audit) |
+| **Patch verified by Slither** (green) | F3: no High/Medium left, and every original public/external function is still present (not a full audit) |
+| **Patch removed public functions** | F3: Slither went quiet because an entry point was deleted — not a fix |
 | **Patch failed Slither re-check** | F3 rejected the proposed fix — verification can say no |
 | **Fix proposed** | Muse returned a full patched contract |
 | **Retry patch once** (amber bar) | F3 failed → one user-triggered repair + F3 again |
@@ -197,7 +198,7 @@ Optional: try **Access Control** and **Unchecked Call**. Source for every button
 ## Limitations
 
 - Not a substitute for a professional audit.
-- F3 “verified” is detector-scoped (Slither High/Medium), not a proof of safety.
+- F3 “verified” means Slither reports no High/Medium issue and the patch kept the original public/external surface (functions, receive, fallback). It is not a proof of safety. A rewrite that keeps the function but hides the bug can still pass.
 - Retry state is **in-memory** (lost on restart / multi-instance).
 - Multi-file repos and agentic tool loops are out of scope for this demo.
 
