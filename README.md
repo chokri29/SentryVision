@@ -56,12 +56,12 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Slither re-verification"]
+    H --> I["F3: Sli ther re-verification"]
     I --> G
-    I -->|"Rejected: user clicks Retry once"| J["Optional: Muse Wonder repair"]
-    J --> K["F3: Slither re-check"]
-    K --> G
+    I -->|"F3 rejected (user clicks Retry once)"| J["Optional: Muse Wonder repair"]
+    J --> I
 ```
+
 
 ### Verification claim (honest)
 
