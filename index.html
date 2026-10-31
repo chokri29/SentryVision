@@ -105,7 +105,6 @@
       color: #111; font-weight: 700; font-size: 0.88rem; cursor: pointer;
     }
     .retry-bar button:disabled { opacity: 0.55; cursor: not-allowed; }
-    .retry-note { margin: 0 0 8px; color: #9aa8b8; font-size: 0.8rem; }
     .finding { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
     .finding-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
     .finding-top h3 { margin: 0; font-size: 1.05rem; }
@@ -142,7 +141,7 @@
         <span class="status-pill model checking" id="pillModel"><span class="dot"></span><span class="label">Spark</span><span class="value" id="pillModelValue">…</span></span>
         <span class="status-pill wonder checking" id="pillWonder"><span class="dot"></span><span class="label">Wonder</span><span class="value" id="pillWonderValue">…</span></span>
       </div>
-      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Patch verified by Slither</em> means no High/Medium findings remain and every original public function is still there — not that the contract is fully safe. Deleting a function to silence Slither is rejected.</p>
+      <p class="pipeline" id="pipelineExplain">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. If a patch fails, you can <strong>retry once</strong> with a stronger repair model (Muse Wonder when configured). Green <em>Passed Slither re-scan + surface check</em> means no High/Medium findings remain and every original public signature is still present — not that the contract is fully safe. Deleting or gutting entry points to silence Slither is rejected.</p>
     </header>
     <section class="panel">
       <div class="samples">
@@ -287,13 +286,13 @@
     }
     function patchStatusLabel(status, verified, failureKind) {
       const s = (status || 'not_checked').toLowerCase();
-      if (s === 'verified' || verified === true) return 'Patch verified by Slither';
+      if (s === 'verified' || verified === true) return 'Passed Slither re-scan + surface check';
       if (failureKind === 'compile_failed') return 'Patch failed to compile';
       if (failureKind === 'still_vulnerable') return 'Still vulnerable';
       if (failureKind === 'regression_introduced') return 'New issue introduced';
-      if (failureKind === 'surface_removed') return 'Patch removed public functions';
-      if (failureKind === 'verification_skipped') return 'Model only — not verified';
+      if (failureKind === 'surface_removed') return 'Patch removed/changed public signatures';
       if (failureKind === 'model_no_patch') return 'No patch produced';
+      if (failureKind === 'verification_skipped') return 'Model only — not verified';
       if (s === 'failed') return 'Patch failed Slither re-check';
       return 'Patch not checked';
     }
@@ -328,12 +327,6 @@
           const details = document.createElement('p');
           details.className = 'patch-details'; details.textContent = finding.patch_verification_details;
           patchRow.appendChild(details);
-        }
-        if (finding.retry_change_summary) {
-          const note = document.createElement('p');
-          note.className = 'retry-note';
-          note.textContent = 'Retry change: ' + finding.retry_change_summary;
-          patchRow.appendChild(note);
         }
         if (hasPatch) {
           const wrap = document.createElement('div');
@@ -389,8 +382,7 @@
           (wonderConfigured ? 'Muse Wonder' : 'a stronger repair pass') +
           ' (' + count + '/' + maxR + ' used). Verified ≠ fully safe.';
       }
-      btn.disabled = false;
-      btn.textContent = 'Retry patch once';
+      btn.disabled = false; btn.textContent = 'Retry patch once';
       bar.classList.add('visible');
     }
     async function renderAuditData(data) {
