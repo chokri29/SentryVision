@@ -72,7 +72,7 @@ MAX_PATCH_RETRIES = max(0, int(os.getenv("MAX_PATCH_RETRIES", "1")))
 MAX_DAILY_AI_CALLS = max(1, int(os.getenv("MAX_DAILY_AI_CALLS", "100")))
 REDIS_URL = os.getenv("REDIS_URL")
 RATE_LIMIT_HMAC_KEY = os.getenv("RATE_LIMIT_HMAC_KEY") or os.getenv("LLM_API_KEY") or "local-development-only"
-TRUST_CF_CONNECTING_IP = os.getenv("TRUST_CF_CONNECTING_IP", "false").strip().lower() in {"1", "true", "yes", "on"}
+TRUST_CF_CONNECTING_IP = os.getenv("TRUST_CF_CONNECTING_IP", "true").strip().lower() in {"1", "true", "yes", "on"}
 REQUIRE_SHARED_STORAGE = os.getenv("REQUIRE_SHARED_STORAGE", "false").strip().lower() in {"1", "true", "yes", "on"}
 ANALYSIS_TTL_SECONDS = int(os.getenv("ANALYSIS_TTL_SECONDS", "3600"))
 ANALYSIS_STORE_MAX = int(os.getenv("ANALYSIS_STORE_MAX", "200"))
@@ -323,7 +323,11 @@ def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, 
     }
     store = _redis()
     if store:
-        store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+        try:
+            store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+        except Exception as exc:
+            logger.exception("Could not persist shared analysis state")
+            raise HTTPException(status_code=503, detail="Shared retry storage is temporarily unavailable.") from exc
     elif REQUIRE_SHARED_STORAGE:
         raise HTTPException(status_code=503, detail="Shared retry storage is not configured. Please try again later.")
     else:
@@ -336,8 +340,10 @@ def get_analysis(analysis_id: str) -> Optional[dict[str, Any]]:
         if store:
             raw = store.get(f"sv:analysis:{analysis_id}")
             return json.loads(raw) if raw else None
-    except Exception:
+    except Exception as exc:
         logger.exception("Could not retrieve shared analysis state")
+        if REQUIRE_SHARED_STORAGE:
+            raise HTTPException(status_code=503, detail="Shared retry storage is temporarily unavailable.") from exc
         return None
     _prune_analysis_store()
     row = analysis_store.get(analysis_id)
@@ -350,7 +356,11 @@ def get_analysis(analysis_id: str) -> Optional[dict[str, Any]]:
 def update_analysis(analysis_id: str, row: dict[str, Any]) -> None:
     store = _redis()
     if store:
-        store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+        try:
+            store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+        except Exception as exc:
+            logger.exception("Could not update shared analysis state")
+            raise HTTPException(status_code=503, detail="Shared retry storage is temporarily unavailable.") from exc
     elif REQUIRE_SHARED_STORAGE:
         raise HTTPException(status_code=503, detail="Shared retry storage is not configured.")
     else:
