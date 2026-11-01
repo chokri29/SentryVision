@@ -69,13 +69,13 @@ def _installed_solc_versions() -> List[str]:
     if artifacts.is_dir():
         for item in artifacts.glob("solc-*"):
             version = item.name.removeprefix("solc-")
-            if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", version) and _solc_artifact_path(version):
+            if re.fullmatch(r"\d+\.\d+\.\d+", version) and _solc_artifact_path(version):
                 versions.append(version)
     return sorted(set(versions), key=Version)
 
 
 def _extract_solc_version(source_code: str) -> Optional[str]:
-    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     spec = match.group(1).strip() if match else DEFAULT_SOLC
     try:
         constraint = NpmSpec(spec)
@@ -85,7 +85,7 @@ def _extract_solc_version(source_code: str) -> Optional[str]:
     matches = [v for v in _installed_solc_versions() if constraint.match(Version(v))]
     if matches:
         return sorted(matches, key=Version)[-1]
-    if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", spec):
+    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
         return spec if _install_solc(spec) else None
     return None
 
@@ -242,7 +242,7 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
     rewritten = rewrite_known_oz_imports(source_code)
     selected_version = _extract_solc_version(source_code)
     if not selected_version:
-        pragma_match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+        pragma_match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
         pragma_spec = pragma_match.group(1).strip() if pragma_match else DEFAULT_SOLC
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"No installed Solidity compiler satisfies pragma: {pragma_spec}", "error_kind": "compile_failed"}
     solc_ver, solc_bin = _resolve_solc_binary(selected_version)
