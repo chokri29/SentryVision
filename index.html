@@ -176,6 +176,7 @@
       <section id="consolidatedPatch" class="consolidated-patch" hidden>
         <div class="consolidated-head"><div><h2>Consolidated Contract Patch</h2><p id="consolidatedStatus" class="patch-details"></p></div><div class="patch-actions"><button type="button" id="toggleDiffBtn" class="patch-toggle">Show unified diff</button><button type="button" id="toggleCodeBtn" class="patch-toggle">Show full patch</button><button type="button" id="copyPatchBtn" class="patch-toggle">Copy patch</button><button type="button" id="downloadPatchBtn" class="patch-toggle">Download .sol</button></div></div>
         <p id="patchChangeSummary" class="patch-details"></p>
+        <p class="patch-details">Privacy: Solidity source is sent to Baseten for analysis. If you request the optional retry, source and patch context are sent to Meta. Source and patch are temporarily stored in Redis for up to one hour for that retry.</p>
         <pre id="consolidatedDiff" class="patch-code"></pre>
         <pre id="consolidatedCode" class="patch-code"></pre>
         <p class="patch-details">A passed Slither re-check is a limited static-analysis result, not proof that the contract is secure or behaviorally correct.</p>
@@ -414,7 +415,10 @@
         if (!result || !result.svg || /Syntax error in text/i.test(result.svg)) {
           throw new Error('Mermaid returned an invalid diagram');
         }
-        host.innerHTML = result.svg;
+        const parsed = new DOMParser().parseFromString(result.svg, 'image/svg+xml');
+        const svg = parsed.documentElement;
+        if (!svg || svg.localName !== 'svg' || parsed.querySelector('parsererror')) throw new Error('Invalid Mermaid SVG');
+        host.replaceChildren(document.importNode(svg, true));
       };
       try {
         await renderSource(source);
@@ -491,7 +495,7 @@
         if (!patch.code) return;
         const blob = new Blob([patch.code], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a'); link.href = url; link.download = 'sentryvision-consolidated-patch.sol';
+        const link = document.createElement('a'); link.href = url; link.download = 'patched_contract.sol';
         document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
       };
     }
@@ -515,7 +519,7 @@
         if (meta.is_retry) line += ' · Retry #' + (meta.retry_count || 1);
         summaryMeta.textContent = line;
       }
-      findingsEl.innerHTML = '';
+      findingsEl.replaceChildren();
       if (!findings.length) {
         const empty = document.createElement('div'); empty.className = 'empty';
         if (meta.f1_ran === false) {
@@ -550,6 +554,10 @@
         if (!response.ok) {
           let detail = 'Retry failed.';
           try { const body = await response.json(); detail = body.detail || detail; } catch (_) {}
+          if (response.status === 429) {
+            const retryAfter = Math.max(1, Number(response.headers.get('Retry-After')) || 60);
+            detail = 'Rate limit reached. Try again in ' + retryAfter + ' seconds.';
+          }
           throw new Error(detail);
         }
         const data = await response.json();
@@ -571,7 +579,7 @@
       if (!code.trim()) { showStatus('error', 'Please paste some Solidity code first.'); return; }
       btn.disabled = true; clearStatus(); startProgressStatus();
       document.getElementById('results').style.display = 'none';
-      document.getElementById('findings').innerHTML = '';
+      document.getElementById('findings').replaceChildren();
       hideRetryBar(); lastAnalysisId = null; lastRetryAvailable = false;
       try {
         const response = await fetch(getBackendUrl(), {
@@ -581,6 +589,10 @@
         if (!response.ok) {
           let detail = 'Backend failed.';
           try { const body = await response.json(); detail = body.detail || detail; } catch (_) {}
+          if (response.status === 429) {
+            const retryAfter = Math.max(1, Number(response.headers.get('Retry-After')) || 60);
+            detail = 'Rate limit reached. Try again in ' + retryAfter + ' seconds.';
+          }
           throw new Error(detail);
         }
         const data = await response.json();
