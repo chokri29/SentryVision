@@ -175,24 +175,36 @@ class Finding(BaseModel):
 class LLMOutput(BaseModel):
     summary: str
     findings: list[Finding] = Field(default_factory=list)
+    consolidated_patch: Optional[str] = None
+    patch_change_summary: Optional[str] = None
+
+
+class ConsolidatedPatch(BaseModel):
+    code: Optional[str] = None
+    diff: str = ""
+    change_summary: Optional[str] = None
+    patch_verified: bool = False
+    verification_status: Literal["verified", "failed", "not_checked", "slither_unavailable"] = "not_checked"
+    verification_details: Optional[str] = None
+    failure_kind: Optional[str] = None
+    remaining_checks: list[str] = Field(default_factory=list)
+    behaviour_lite_passed: bool = False
+    retry_available: bool = False
+    retry_count: int = 0
 
 
 class AuditResponse(BaseModel):
     summary: str
     findings: list[Finding]
+    consolidated_patch: Optional[ConsolidatedPatch] = None
     meta: dict = Field(default_factory=dict)
 
 
-class RetryFindingPatch(BaseModel):
-    index: int
-    patched_code: Optional[str] = None
+class RetryLLMOutput(BaseModel):
+    consolidated_patch: Optional[str] = None
     change_summary: str = ""
     unable_to_fix: bool = False
     unable_reason: Optional[str] = None
-
-
-class RetryLLMOutput(BaseModel):
-    findings: list[RetryFindingPatch] = Field(default_factory=list)
 
 
 RATE_LIMIT_WINDOW_SECONDS = 60
@@ -309,42 +321,30 @@ def extract_json_text(raw: str) -> str:
     return text
 
 
-def build_retry_messages(*, original_code: str, findings_rows: list, solc_hint: str = "0.8.x") -> list:
-    blocks = []
-    for idx, f in findings_rows:
-        failed_patch = (f.get("patched_code") or "").strip()
-        remaining = f.get("remaining_checks") or []
-        kind = f.get("patch_failure_kind") or f.get("patch_verification_status") or "failed"
-        details = (f.get("patch_verification_details") or "")[:500]
-        title = f.get("title") or f"finding_{idx}"
-        severity = f.get("severity") or "?"
-        blocks.append(f"""### FINDING index={idx}
-TITLE: {title}
-SEVERITY: {severity}
-FAILURE_KIND: {kind}
-REMAINING_DETECTORS: {", ".join(remaining) if remaining else "(none listed)"}
-VERIFICATION_DETAILS: {details or "(none)"}
-WHAT_HAPPENS: {(f.get("what_happens") or "")[:400]}
-WHAT_TO_DO: {(f.get("what_to_do") or "")[:300]}
-
-FAILED_PATCH:
-```solidity
-{failed_patch if failed_patch else "(empty)"}
-```
-
-UNIFIED_DIFF (original vs failed_patch):
-```
-{_unified_diff(original_code, failed_patch)}
-```
-""")
-    system = """You are repairing Solidity patch(es) that FAILED automated Slither re-verification.
-Patch the ORIGINAL contract using the failed patch only as negative evidence.
-Return ONLY valid JSON (no markdown fences):
-{"findings":[{"index":0,"patched_code":"full contract or null","change_summary":"string","unable_to_fix":false,"unable_reason":null}]}
-HARD CONSTRAINTS: complete contract when unable_to_fix is false; keep every original public/external function, receive, and fallback — do not delete, rename, or make them internal just to silence Slither; do not remove functionality only to silence detectors; minimal targeted fixes; set unable_to_fix if unsure.
-"""
-    user = "ORIGINAL CODE:\n```solidity\n" + original_code + "\n```\n\nSOLC hint: " + solc_hint + "\n\nFINDINGS TO REPAIR:\n" + "\n".join(blocks) + "\n\nReturn JSON only."
-    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+def build_retry_messages(*, original_code: str, failed_patch: Optional[str], failure_kind: Optional[str], remaining_checks: list, details: Optional[str], findings_rows: list, solc_hint: str = "0.8.x") -> list:
+    context = "\\n".join(f"- {f.get('severity','?')} {f.get('title','Finding')}: {(f.get('what_to_do') or '')[:300]}" for _, f in findings_rows)
+    system = """Repair ONE complete Solidity contract patch that failed Slither re-verification.
+Return ONLY JSON: {"consolidated_patch":"complete contract or null","change_summary":"string","unable_to_fix":false,"unable_reason":null}
+Integrate fixes for all findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. If unsure set unable_to_fix=true."""
+    user = f"""ORIGINAL CONTRACT:
+\x60\x60\x60solidity
+{original_code}
+\x60\x60\x60
+PREVIOUS CONSOLIDATED PATCH:
+\x60\x60\x60solidity
+{failed_patch or "(none)"}
+\x60\x60\x60
+FAILURE: {failure_kind or "failed"}
+REMAINING DETECTORS: {", ".join(remaining_checks or []) or "(none)"}
+DETAILS: {(details or "(none)")[:500]}
+FINDINGS:
+{context}
+DIFF:
+\x60\x60\x60diff
+{_unified_diff(original_code, failed_patch or "")}
+\x60\x60\x60
+Return JSON only."""
+    return [{"role":"system","content":system},{"role":"user","content":user}]
 
 
 def parse_retry_output(raw: str) -> RetryLLMOutput:
@@ -486,15 +486,56 @@ def verify_patches(findings: list, original_code: Optional[str] = None, original
     return findings
 
 
+def verify_consolidated_patch(code: Optional[str], original_code: str, original_checks: Optional[Iterable[str]], allow_verification: bool, change_summary: Optional[str] = None, retry_count: int = 0) -> ConsolidatedPatch:
+    patch = (code or "").strip() or None
+    result = ConsolidatedPatch(code=patch, change_summary=change_summary, diff=_unified_diff(original_code, patch or ""))
+    if not patch:
+        result.failure_kind = "model_no_patch"
+        return result
+    if patch == original_code.strip():
+        result.failure_kind = "patch_identical"
+        result.verification_details = "Patch identical to original — skipped F3."
+        return result
+    if not allow_verification:
+        result.failure_kind = "verification_skipped"
+        result.verification_details = MODEL_ONLY_DETAILS
+        return result
+    if not ENABLE_SLITHER or not is_slither_available():
+        result.verification_status = "slither_unavailable"
+        result.failure_kind = "infra_error"
+        result.verification_details = "Slither unavailable; patch is not verified."
+        return result
+    ratio = len(patch) / max(len(original_code.strip()), 1)
+    if ratio < 0.3 or ratio > 3.0:
+        result.failure_kind = "verification_skipped"
+        result.verification_details = "Patch length abnormal vs original — skipped F3."
+        return result
+    checked = verify_patch(patch, original_entry_points=public_entry_points(original_code), original_code=original_code)
+    result.patch_verified = bool(checked.get("patch_verified"))
+    result.verification_status = checked.get("patch_verification_status", "failed")
+    result.verification_details = (checked.get("patch_verification_details") or "")[:280]
+    result.remaining_checks = list(checked.get("remaining_checks") or [])
+    result.behaviour_lite_passed = bool(checked.get("behaviour_lite_passed"))
+    result.failure_kind = classify_patch_verification(
+        patched_code=patch, original_code=original_code,
+        patch_verification_status=result.verification_status,
+        verification_error_kind=checked.get("verification_error_kind"),
+        remaining_checks=result.remaining_checks,
+        original_high_medium_checks=original_checks, retry_count=retry_count,
+        surface_removed=checked.get("surface_removed") or [],
+        gutted_functions=checked.get("gutted_functions") or [],
+    )["patch_failure_kind"]
+    result.retry_available = bool(not result.patch_verified and result.failure_kind in {"still_vulnerable","compile_failed","regression_introduced","surface_removed","gutted_function"} and retry_count < MAX_PATCH_RETRIES and RETRY_API_KEY)
+    return result
+
+
 def parse_and_validate_model_output(raw: str) -> LLMOutput:
     return LLMOutput.model_validate(json.loads(extract_json_text(raw)))
 
 
-SYSTEM_PROMPT = """You are an expert Web3 security auditor helping developers and non-technical founders.
-Analyze the Solidity contract. Use any Slither findings as ground truth signals, but explain in plain language.
-Return ONLY valid JSON matching this schema (no markdown fences):
-{"summary":"string","findings":[{"title":"string","severity":"Critical|High|Medium|Low|Info","what_happens":"string","why_it_matters":"string","what_to_do":"string","mermaid_diagram":"graph TD; A-->B","patched_code":"optional full contract or null"}]}
-Rules: Prefer real High/Medium issues; mermaid is a simple exploit flowchart; patched_code must be a COMPLETE contract; keep every original public/external function, receive, and fallback (do not delete, rename, or make them internal to silence detectors); do not claim the contract is fully safe.
+SYSTEM_PROMPT = """You are an expert Web3 security auditor. Analyze the Solidity contract using Slither findings as ground-truth signals.
+Return ONLY JSON: {"summary":"string","findings":[{"title":"string","severity":"Critical|High|Medium|Low|Info","what_happens":"string","why_it_matters":"string","what_to_do":"string","mermaid_diagram":"graph TD; A-->B"}],"consolidated_patch":"one complete Solidity contract or null","patch_change_summary":"string"}
+Produce ONE integrated full-contract patch addressing the findings together. Never put code patches inside individual findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. Do not claim the contract is safe.
 """
 
 USER_TEMPLATE = "Solidity source:\n```solidity\n{code}\n```\n\nSlither signals:\n{slither}\n\nReturn JSON only."
@@ -561,23 +602,27 @@ def analyze_contract(request: Request, payload: AuditRequest):
             completion = model_client.chat.completions.create(**kwargs)
             raw_content = completion.choices[0].message.content or ""
             result = parse_and_validate_model_output(raw_content)
-            findings = verify_patches(result.findings, original_code=code, original_high_medium_checks=original_high_medium_checks, allow_verification=slither_error is None)
+            findings = result.findings
+            for finding in findings:
+                finding.patched_code = None
+                finding.patch_verified = False
+                finding.patch_verification_status = "not_checked"
+                finding.retry_available = False
+                finding.retry_recommended = False
+            consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_high_medium_checks, slither_error is None, result.patch_change_summary)
             analysis_id = new_analysis_id()
             store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
-            # Do not advertise a retry action unless the separate Meta credential is configured.
-            if not RETRY_API_KEY:
-                for finding in findings:
-                    finding.retry_available = False
-            any_retry = bool(RETRY_API_KEY) and any(getattr(f, "retry_available", False) for f in findings)
-            return AuditResponse(summary=result.summary, findings=findings, meta={
+            analysis_store[analysis_id]["consolidated_patch"] = consolidated.model_dump()
+            any_retry = consolidated.retry_available
+            return AuditResponse(summary=result.summary, findings=findings, consolidated_patch=consolidated, meta={
                 "analysis_id": analysis_id, "model": MODEL_NAME, "reasoning_repaired": attempt > 0,
                 "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
                 "slither_findings_count": len(slither_findings), "slither_error": slither_error,
                 "f1_ran": slither_error is None,
                 "pipeline_label": "F1 Slither → F2 Muse → F3 verify" if slither_error is None else MODEL_ONLY_PIPELINE,
-                "patches_verified_count": sum(1 for f in findings if getattr(f, "patch_verified", False)),
-                "patches_proposed_count": sum(1 for f in findings if getattr(f, "patched_code", None) and str(getattr(f, "patched_code")).strip()),
-                "patches_failed_count": sum(1 for f in findings if getattr(f, "patch_verification_status", None) == "failed"),
+                "patches_verified_count": int(consolidated.patch_verified),
+                "patches_proposed_count": int(bool(consolidated.code)),
+                "patches_failed_count": int(consolidated.verification_status == "failed"),
                 "retry_count": 0, "max_patch_retries": MAX_PATCH_RETRIES, "retry_available": any_retry,
             })
         except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
@@ -599,76 +644,49 @@ def retry_patch(analysis_id: str, request: Request):
     if retry_count >= MAX_PATCH_RETRIES:
         raise HTTPException(status_code=400, detail="Retry exhausted for this analysis. Review manually.")
     findings_data = list(row.get("findings") or [])
-    targets = _finding_retry_targets(findings_data)
-    if not targets:
-        raise HTTPException(status_code=400, detail="No findings are eligible for retry on this analysis.")
+    previous = row.get("consolidated_patch") or {}
+    if not previous.get("retry_available"):
+        raise HTTPException(status_code=400, detail="The consolidated patch is not eligible for retry.")
     try:
         model_client = retry_client._ensure()
     except RuntimeError as exc:
         logger.warning("Muse Wonder retry is not configured: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="Muse Wonder retry is not configured. Set LLM_RETRY_API_KEY in the service environment.",
-        ) from exc
+        raise HTTPException(status_code=503, detail="Muse Wonder retry is not configured. Set LLM_RETRY_API_KEY in the service environment.") from exc
     original_code = row["original_code"]
-    original_high_medium_checks = row.get("original_high_medium_checks") or []
-    messages = build_retry_messages(original_code=original_code, findings_rows=targets)
+    messages = build_retry_messages(
+        original_code=original_code, failed_patch=previous.get("code"),
+        failure_kind=previous.get("failure_kind"),
+        remaining_checks=previous.get("remaining_checks") or [],
+        details=previous.get("verification_details"),
+        findings_rows=list(enumerate(findings_data)),
+    )
     try:
         completion = model_client.chat.completions.create(model=RETRY_MODEL_NAME, messages=messages, temperature=0.1, max_tokens=MAX_OUTPUT_TOKENS, timeout=RETRY_TIMEOUT_SECONDS)
         retry_result = parse_retry_output(completion.choices[0].message.content or "")
     except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=502, detail="Retry model returned invalid JSON. Please try a fresh /analyze.") from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Retry model call failed: {str(exc)[:200]}") from exc
-    by_index = {p.index: p for p in retry_result.findings}
-    updated = []
-    for i, fdict in enumerate(findings_data):
-        base = Finding.model_validate(fdict)
-        patch = by_index.get(i)
-        if patch is None:
-            base.retry_count = retry_count
-            updated.append(base)
-            continue
-        base.previous_patched_code = base.patched_code
-        base.previous_patch_verification_status = base.patch_verification_status
-        base.previous_patch_failure_kind = base.patch_failure_kind
-        base.retry_change_summary = patch.change_summary or None
-        base.retry_count = retry_count + 1
-        if patch.unable_to_fix or not (patch.patched_code or "").strip():
-            if patch.unable_to_fix:
-                base.patch_verification_status = "not_checked"
-                base.patch_failure_kind = "model_no_patch"
-                base.patch_verification_details = patch.unable_reason or "Model could not produce a reliable patch."
-                base.retry_recommended = False
-                base.retry_available = False
-                base.patch_verified = False
-            updated.append(base)
-            continue
-        base.patched_code = patch.patched_code
-        base.patch_verified = False
-        base.patch_verification_status = "not_checked"
-        base.patch_verification_details = None
-        base.remaining_checks = []
-        base.verification_error_kind = None
-        updated.append(base)
+        logger.exception("Muse Wonder retry failed")
+        raise HTTPException(status_code=502, detail="Retry model call failed. Please try again.") from exc
+    if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
+        consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
+    else:
+        consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_high_medium_checks") or [], row.get("slither_error") is None, retry_result.change_summary, retry_count + 1)
+        consolidated.retry_count = retry_count + 1
+    consolidated.retry_available = False
+    analysis_store[analysis_id]["consolidated_patch"] = consolidated.model_dump()
+    analysis_store[analysis_id]["retry_count"] = retry_count + 1
     f1_ran = row.get("slither_error") is None
-    updated = verify_patches(updated, original_code=original_code, original_high_medium_checks=original_high_medium_checks, allow_verification=f1_ran)
-    for f in updated:
-        if f.retry_count >= MAX_PATCH_RETRIES:
-            f.retry_available = False
-    new_retry_count = retry_count + 1
-    store_analysis(analysis_id=analysis_id, original_code=original_code, contract_name=row.get("contract_name") or "Contract.sol", findings=updated, original_high_medium_checks=original_high_medium_checks, slither_error=row.get("slither_error"), model_used=RETRY_MODEL_NAME, summary=row.get("summary") or "", retry_count=new_retry_count)
-    any_retry = any(f.retry_available for f in updated)
-    return AuditResponse(summary=row.get("summary") or "", findings=updated, meta={
+    return AuditResponse(summary=row.get("summary") or "", findings=[Finding.model_validate(f) for f in findings_data], consolidated_patch=consolidated, meta={
         "analysis_id": analysis_id, "model": RETRY_MODEL_NAME, "retry_model": RETRY_MODEL_NAME,
         "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
         "slither_error": row.get("slither_error"), "f1_ran": f1_ran,
-        "pipeline_label": "F2 retry (Wonder) → F3 verify" if f1_ran else MODEL_ONLY_PIPELINE,
-        "patches_verified_count": sum(1 for f in updated if f.patch_verified),
-        "patches_proposed_count": sum(1 for f in updated if (f.patched_code or "").strip()),
-        "patches_failed_count": sum(1 for f in updated if f.patch_verification_status == "failed"),
-        "retry_count": new_retry_count, "max_patch_retries": MAX_PATCH_RETRIES,
-        "retry_available": any_retry and new_retry_count < MAX_PATCH_RETRIES, "is_retry": True,
+        "pipeline_label": "Muse Wonder → one consolidated F3 verification" if f1_ran else MODEL_ONLY_PIPELINE,
+        "patches_verified_count": int(consolidated.patch_verified),
+        "patches_proposed_count": int(bool(consolidated.code)),
+        "patches_failed_count": int(consolidated.verification_status == "failed"),
+        "retry_count": retry_count + 1, "max_patch_retries": MAX_PATCH_RETRIES,
+        "retry_available": False, "is_retry": True,
     })
 
 

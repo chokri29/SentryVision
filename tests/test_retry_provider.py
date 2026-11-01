@@ -72,6 +72,14 @@ def test_retry_endpoint_does_not_fall_back_to_baseten_when_meta_is_unconfigured(
         "original_high_medium_checks": [],
         "slither_error": None,
         "summary": "Test",
+        "consolidated_patch": {
+            "code": "contract C { function withdraw() external {} }",
+            "diff": "--- original.sol",
+            "failure_kind": "still_vulnerable",
+            "verification_status": "failed",
+            "retry_available": True,
+            "remaining_checks": ["reentrancy-eth"],
+        },
     }
     monkeypatch.setattr(main, "get_analysis", lambda _analysis_id: row)
     monkeypatch.setattr(main, "enforce_rate_limit", lambda _ip: None)
