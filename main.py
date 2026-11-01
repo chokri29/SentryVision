@@ -314,7 +314,7 @@ def new_analysis_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
-def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
+def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], original_detector_checks: Optional[list] = None, slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
     _prune_analysis_store()
     serialized = [f.model_dump() if hasattr(f, "model_dump") else dict(f) for f in findings]
     prev = get_analysis(analysis_id) or {}
@@ -325,6 +325,7 @@ def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, 
         "summary": summary,
         "findings": serialized,
         "original_high_medium_checks": list(original_high_medium_checks or []),
+        "original_detector_checks": list(original_detector_checks or []),
         "slither_error": slither_error,
         "model_used": model_used,
         "retry_count": int(retry_count),
@@ -496,7 +497,7 @@ MODEL_ONLY_DETAILS = "Model only — Slither did not analyze the original contra
 MODEL_ONLY_PIPELINE = "Model only — not verified (static analysis unavailable)"
 
 
-def verify_patches(findings: list, original_code: Optional[str] = None, original_high_medium_checks: Optional[Iterable[str]] = None, allow_verification: bool = True):
+def verify_patches(findings: list, original_code: Optional[str] = None, original_high_medium_checks: Optional[Iterable[str]] = None, allow_verification: bool = True, original_detector_checks: Optional[Iterable[str]] = None):
     if not allow_verification:
         for f in findings:
             f.patch_verified = False
@@ -561,7 +562,7 @@ def verify_patches(findings: list, original_code: Optional[str] = None, original
                 c = classify_patch_verification(patched_code=f.patched_code, original_code=original_code, patch_verification_status="not_checked", verification_error_kind=None, remaining_checks=[], original_high_medium_checks=original_high_medium_checks, retry_count=f.retry_count)
                 f.patch_failure_kind, f.retry_recommended, f.retry_available = c["patch_failure_kind"], c["retry_recommended"], c["retry_available"]
                 continue
-        result = verify_patch(code, original_entry_points=public_entry_points(original_code) if original_code else None, original_code=original_code)
+        result = verify_patch(code, target_checks=list(original_detector_checks) if original_detector_checks is not None else None, original_entry_points=public_entry_points(original_code) if original_code else None, original_code=original_code)
         verified_count += 1
         f.patch_verified = result.get("patch_verified", False)
         f.patch_verification_status = result.get("patch_verification_status", "failed")
@@ -579,7 +580,7 @@ def verify_patches(findings: list, original_code: Optional[str] = None, original
     return findings
 
 
-def verify_consolidated_patch(code: Optional[str], original_code: str, original_checks: Optional[Iterable[str]], allow_verification: bool, change_summary: Optional[str] = None, retry_count: int = 0) -> ConsolidatedPatch:
+def verify_consolidated_patch(code: Optional[str], original_code: str, original_checks: Optional[Iterable[str]], allow_verification: bool, change_summary: Optional[str] = None, retry_count: int = 0, original_high_medium_checks: Optional[Iterable[str]] = None) -> ConsolidatedPatch:
     patch = (code or "").strip() or None
     result = ConsolidatedPatch(code=patch, change_summary=change_summary, diff=_unified_diff(original_code, patch or ""))
     if not patch:
@@ -603,7 +604,7 @@ def verify_consolidated_patch(code: Optional[str], original_code: str, original_
         result.failure_kind = "verification_skipped"
         result.verification_details = "Patch length abnormal vs original — skipped F3."
         return result
-    checked = verify_patch(patch, target_checks=list(original_checks or []), original_entry_points=public_entry_points(original_code), original_code=original_code)
+    checked = verify_patch(patch, target_checks=list(original_checks) if original_checks is not None else None, original_entry_points=public_entry_points(original_code), original_code=original_code)
     result.patch_verified = bool(checked.get("patch_verified"))
     result.verification_status = checked.get("patch_verification_status", "failed")
     result.verification_details = (checked.get("patch_verification_details") or "")[:280]
@@ -614,7 +615,7 @@ def verify_consolidated_patch(code: Optional[str], original_code: str, original_
         patch_verification_status=result.verification_status,
         verification_error_kind=checked.get("verification_error_kind"),
         remaining_checks=result.remaining_checks,
-        original_high_medium_checks=original_checks, retry_count=retry_count,
+        original_high_medium_checks=original_high_medium_checks if original_high_medium_checks is not None else original_checks, retry_count=retry_count,
         surface_removed=checked.get("surface_removed") or [],
         gutted_functions=checked.get("gutted_functions") or [],
     )["patch_failure_kind"]
@@ -686,7 +687,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
         model_client = client._ensure()
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail="Server is not configured correctly.") from exc
-    slither_findings, slither_error, original_high_medium_checks = [], None, None
+    slither_findings, slither_error, original_high_medium_checks, original_detector_checks = [], None, None, None
     if ENABLE_SLITHER:
         slither_result = run_slither(code, payload.contract_name)
         if slither_result is None:
@@ -695,6 +696,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
             slither_error = slither_result.get("error") or "Slither failed"
         else:
             slither_findings = slither_result.get("filtered_detectors") or slither_result.get("detectors") or []
+            original_detector_checks = sorted(set(slither_result.get("detector_checks") or []))
             original_high_medium_checks = sorted({d["check"] for d in (slither_result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
     else:
         slither_error = "Slither disabled"
@@ -729,9 +731,9 @@ def analyze_contract(request: Request, payload: AuditRequest):
                 finding.patch_verification_status = "not_checked"
                 finding.retry_available = False
                 finding.retry_recommended = False
-            consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_high_medium_checks, slither_error is None, result.patch_change_summary)
+            consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_detector_checks, slither_error is None, result.patch_change_summary, original_high_medium_checks=original_high_medium_checks)
             analysis_id = new_analysis_id()
-            store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
+            store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, original_detector_checks=original_detector_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
             analysis_row = get_analysis(analysis_id) or {}
             analysis_row["consolidated_patch"] = consolidated.model_dump()
             update_analysis(analysis_id, analysis_row)
@@ -794,7 +796,7 @@ def retry_patch(analysis_id: str, request: Request):
     if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
         consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
     else:
-        consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_high_medium_checks") or [], row.get("slither_error") is None, retry_result.change_summary, retry_count + 1)
+        consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_detector_checks"), row.get("slither_error") is None, retry_result.change_summary, retry_count + 1, original_high_medium_checks=row.get("original_high_medium_checks") or [])
         consolidated.retry_count = retry_count + 1
     consolidated.retry_available = False
     row["consolidated_patch"] = consolidated.model_dump()
