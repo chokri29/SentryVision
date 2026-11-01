@@ -1,3 +1,4 @@
+import pytest
 import json
 from types import SimpleNamespace
 
@@ -164,3 +165,39 @@ def test_redis_daily_ai_budget_is_global_and_enforced(monkeypatch):
         main.enforce_rate_limit("198.51.100.7")
     assert exc.value.status_code == 429
     assert "Daily AI usage limit" in exc.value.detail
+
+
+
+def test_rate_limit_is_configurable_and_returns_retry_after(monkeypatch):
+    from fastapi import HTTPException
+    monkeypatch.setattr(main, "MAX_REQUESTS_PER_WINDOW", 6)
+    class LimitedRedis:
+        def eval(self, *_args):
+            return [-1, 0]
+    monkeypatch.setattr(main, "_redis", lambda: LimitedRedis())
+    with pytest.raises(HTTPException) as exc:
+        main.enforce_rate_limit("198.51.100.9")
+    assert exc.value.status_code == 429
+    assert exc.value.headers["Retry-After"] == "60"
+
+
+def test_redis_failure_fails_closed_before_model_call(monkeypatch):
+    from fastapi import HTTPException
+    monkeypatch.setattr(main, "REQUIRE_SHARED_STORAGE", True)
+    monkeypatch.setattr(main.os, "getenv", lambda key, default=None: "true" if key == "REQUIRE_REDIS_RATE_LIMIT" else default)
+    class BrokenRedis:
+        def eval(self, *_args):
+            raise ConnectionError("redis unavailable")
+    monkeypatch.setattr(main, "_redis", lambda: BrokenRedis())
+    with pytest.raises(HTTPException) as exc:
+        main.enforce_rate_limit("198.51.100.10")
+    assert exc.value.status_code == 503
+
+
+def test_missing_retry_state_has_clear_expired_message(monkeypatch):
+    monkeypatch.setattr(main, "enforce_rate_limit", lambda _ip: None)
+    monkeypatch.setattr(main, "get_analysis", lambda _analysis_id: None)
+    response = TestClient(main.app).post("/analyze/expired-id/retry-patch")
+    assert response.status_code == 404
+    assert "expired" in response.json()["detail"].lower()
+    assert "run the analysis again" in response.json()["detail"].lower()

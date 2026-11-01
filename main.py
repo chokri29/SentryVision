@@ -223,7 +223,7 @@ class RetryLLMOutput(BaseModel):
 
 
 RATE_LIMIT_WINDOW_SECONDS = 60
-MAX_REQUESTS_PER_WINDOW = 6
+MAX_REQUESTS_PER_WINDOW = max(1, int(os.getenv("MAX_REQUESTS_PER_MINUTE", "6")))
 request_history: dict[str, deque[float]] = defaultdict(deque)
 daily_request_counts: dict[str, int] = defaultdict(int)
 _redis_client = None
@@ -284,7 +284,7 @@ def enforce_rate_limit(client_ip: str) -> None:
         daily_request_counts[today] += 1
         minute_count, daily_count = len(history), daily_request_counts[today]
     if minute_count < 0 or minute_count > MAX_REQUESTS_PER_WINDOW:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a minute.")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in 60 seconds.", headers={"Retry-After": str(RATE_LIMIT_WINDOW_SECONDS)})
     if daily_count > MAX_DAILY_AI_CALLS:
         raise HTTPException(status_code=429, detail="Daily AI usage limit reached. Please try again tomorrow.")
 
@@ -295,7 +295,7 @@ def get_client_ip(request: Request) -> str:
         try:
             return str(ipaddress.ip_address(candidate))
         except ValueError:
-            logger.warning("Trusted edge IP header missing or invalid; falling back to socket peer")
+            logger.info("Client IP source: direct peer (edge header unavailable)")
     return request.client.host if request.client else "unknown"
 
 def _prune_analysis_store(now: Optional[float] = None) -> None:
@@ -761,7 +761,7 @@ def retry_patch(analysis_id: str, request: Request):
     enforce_rate_limit(get_client_ip(request))
     row = get_analysis(analysis_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Analysis not found or expired. Run /analyze again.")
+        raise HTTPException(status_code=404, detail="This retry has expired or is no longer available. Please run the analysis again.")
     retry_count = int(row.get("retry_count") or 0)
     if retry_count >= MAX_PATCH_RETRIES:
         raise HTTPException(status_code=400, detail="Retry exhausted for this analysis. Review manually.")
@@ -772,7 +772,7 @@ def retry_patch(analysis_id: str, request: Request):
     try:
         model_client = retry_client._ensure()
     except RuntimeError as exc:
-        logger.warning("Muse Wonder retry is not configured: %s", exc)
+        logger.warning("Muse Wonder retry is not configured")
         raise HTTPException(status_code=503, detail="Muse Wonder retry is not configured. Set LLM_RETRY_API_KEY in the service environment.") from exc
     original_code = row["original_code"]
     messages = build_retry_messages(
@@ -786,7 +786,7 @@ def retry_patch(analysis_id: str, request: Request):
         completion = model_client.chat.completions.create(model=RETRY_MODEL_NAME, messages=messages, temperature=0.1, max_tokens=MAX_OUTPUT_TOKENS, timeout=RETRY_TIMEOUT_SECONDS)
         retry_result = parse_retry_output(completion.choices[0].message.content or "")
     except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
-        logger.warning("Muse Wonder returned invalid retry JSON: %s", str(exc)[:200])
+        logger.warning("Muse Wonder returned invalid retry JSON")
         raise HTTPException(status_code=502, detail="Retry model returned an invalid response. Please try again.") from exc
     except Exception as exc:
         logger.exception("Muse Wonder retry failed")
