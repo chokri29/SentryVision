@@ -314,7 +314,7 @@ def new_analysis_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
-def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], original_detector_checks: Optional[list] = None, slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
+def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], original_detector_checks: Optional[list], slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
     _prune_analysis_store()
     serialized = [f.model_dump() if hasattr(f, "model_dump") else dict(f) for f in findings]
     prev = get_analysis(analysis_id) or {}
