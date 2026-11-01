@@ -558,10 +558,13 @@ def verify_patch(
         original_entry_points = public_entry_points(original_code)
     if target_checks is None:
         baseline = run_slither(original_code, contract_name, require_pragma=True)
-        if not baseline or not baseline.get("success"):
-            reason = (baseline or {}).get("error") or "Slither baseline analysis unavailable."
+        if baseline is None:
+            base.update({"patch_verification_status": "slither_unavailable", "verification_error_kind": "slither_unavailable", "patch_verification_details": "Slither unavailable; original detector baseline could not be established. Patch is not verified."})
+            return base
+        if not baseline.get("success"):
+            reason = baseline.get("error") or "Slither baseline analysis unavailable."
             details = reason if reason == "unverified: no compatible compiler installed." else "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]
-            error_kind = "compile_failed" if reason == "unverified: no compatible compiler installed." else "baseline_unavailable"
+            error_kind = "compile_failed" if reason == "unverified: no compatible compiler installed." else baseline.get("error_kind") or "baseline_unavailable"
             base.update({"patch_verification_status": "failed", "verification_error_kind": error_kind, "patch_verification_details": details})
             return base
         target_checks = list(baseline.get("detector_checks") or [])
