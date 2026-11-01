@@ -155,3 +155,22 @@ def test_receive_and_fallback_are_preserved_entry_points(monkeypatch):
 
     assert result["patch_verified"] is False
     assert result["surface_removed"] == ["receive()"]
+
+
+def test_original_detector_baseline_is_derived_when_not_supplied(monkeypatch):
+    calls = []
+
+    def fake_run_slither(source, *_args, **_kwargs):
+        calls.append(source)
+        checks = ["original-detector"] if source == ORIGINAL else ["original-detector"]
+        return _slither_result(detector_checks=checks)
+
+    monkeypatch.setattr(slither_runner, "run_slither", fake_run_slither)
+    result = verify_patch(
+        ORIGINAL,
+        original_code=ORIGINAL,
+    )
+
+    assert len(calls) == 2
+    assert result["patch_verified"] is False
+    assert result["remaining_checks"] == ["original-detector"]
