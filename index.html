@@ -289,10 +289,39 @@
       return text;
     }
     function sanitizeMermaid(raw) {
-      if (typeof raw !== 'string' || !raw.trim()) return 'graph TD\nA[Attacker] --> B[Contract]';
-      let cleaned = raw.replace(/```(?:mermaid)?/gi, '').replace(/```/g, '').replace(/`/g, '').trim();
+      if (typeof raw !== 'string' || !raw.trim()) return '';
+      let cleaned = raw
+        .replace(/```(?:mermaid)?/gi, '')
+        .replace(/```/g, '')
+        .replace(/`/g, '')
+        .replace(/^\s*%%\{[\s\S]*?\}%%\s*$/gm, '')
+        .replace(/\r\n?/g, '\n')
+        .trim();
       if (!/^(graph|flowchart)\s+/i.test(cleaned)) cleaned = 'graph TD\n' + cleaned;
       return cleaned;
+    }
+    function safeDiagramLabel(value, maxLength) {
+      return String(value || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/[\\r\\n]+/g, ' ')
+        .replace(/[()[\\]{}<>|"'\x60;#]/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength || 84) || 'Details unavailable';
+    }
+    function buildFallbackDiagram(finding) {
+      const title = safeDiagramLabel(finding && finding.title, 64);
+      const attack = safeDiagramLabel(finding && finding.what_happens, 96);
+      const impact = safeDiagramLabel(finding && finding.why_it_matters, 96);
+      const fix = safeDiagramLabel(finding && finding.what_to_do, 96);
+      return [
+        'flowchart TD',
+        '  A["Finding: ' + title + '"]',
+        '  B["Attack path: ' + attack + '"]',
+        '  C["Potential impact: ' + impact + '"]',
+        '  D["Suggested mitigation: ' + fix + '"]',
+        '  A --> B --> C --> D'
+      ].join('\\n');
     }
     function patchStatusClass(status) {
       const s = (status || 'not_checked').toLowerCase();
@@ -364,13 +393,30 @@
       diagramWrap.appendChild(host); card.appendChild(diagramWrap);
       return { card: card, host: host, source: sanitizeMermaid(finding.mermaid_diagram) };
     }
-    async function renderMermaid(host, source) {
-      try {
+    async function renderMermaid(host, source, finding) {
+      const renderSource = async function (candidate) {
+        if (!candidate) throw new Error('No diagram source');
+        if (typeof mermaid.parse === 'function') await mermaid.parse(candidate);
         const id = 'mmd-' + Math.random().toString(36).slice(2);
-        const result = await mermaid.render(id, source);
+        const result = await mermaid.render(id, candidate);
+        if (!result || !result.svg || /Syntax error in text/i.test(result.svg)) {
+          throw new Error('Mermaid returned an invalid diagram');
+        }
         host.innerHTML = result.svg;
+      };
+      try {
+        await renderSource(source);
+        return;
       } catch (err) {
-        host.innerHTML = '<p style="color:#9aa8b8;margin:0;font-size:0.9rem;">Diagram unavailable.</p>';
+        try {
+          const note = document.createElement('p');
+          note.className = 'diagram-fallback-note';
+          note.textContent = 'The generated diagram was invalid. Showing a safe summary flow instead.';
+          host.appendChild(note);
+          await renderSource(buildFallbackDiagram(finding));
+        } catch (fallbackError) {
+          host.textContent = 'Diagram unavailable. Review the finding description above.';
+        }
       }
     }
     let progressTimer = null;
@@ -466,7 +512,7 @@
         for (let i = 0; i < findings.length; i++) {
           const built = createFindingCard(findings[i], i);
           findingsEl.appendChild(built.card);
-          await renderMermaid(built.host, built.source);
+          await renderMermaid(built.host, built.source, findings[i]);
         }
       }
       showRetryBar(meta);
