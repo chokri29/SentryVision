@@ -478,7 +478,9 @@ def classify_patch_verification(*, patched_code: Optional[str], original_code: O
         checks = list(remaining_checks or [])
         removed = [name for name in (surface_removed or []) if name]
         baseline = set(original_high_medium_checks or []) if original_high_medium_checks is not None else None
-        if checks and baseline is not None and all(c not in baseline for c in checks):
+        if checks and baseline is not None and any(c not in baseline for c in checks):
+            # Any newly introduced Critical/High/Medium detector is a regression,
+            # even when one or more baseline findings remain unresolved.
             patch_failure_kind, retry_recommended = "regression_introduced", True
         elif checks:
             patch_failure_kind, retry_recommended = "still_vulnerable", True
