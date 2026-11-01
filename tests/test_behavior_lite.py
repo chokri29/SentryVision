@@ -45,7 +45,7 @@ def test_preserved_withdraw_revert_is_rejected(monkeypatch):
     result = _verify(monkeypatch, original, patched)
     assert result["patch_verified"] is False
     assert result["patch_verification_status"] == "failed"
-    assert result["gutted_functions"] == ["withdraw(uint256)"]
+    assert result["gutted_functions"] == ["withdraw(uint256)|nonpayable|()"]
 
 
 def test_original_already_reverting_entry_point_is_not_flagged(monkeypatch):
@@ -71,4 +71,4 @@ def test_empty_preserved_body_is_rejected(monkeypatch):
     )
     result = _verify(monkeypatch, original, patched)
     assert result["patch_verified"] is False
-    assert result["gutted_functions"] == ["withdraw(uint256)"]
+    assert result["gutted_functions"] == ["withdraw(uint256)|nonpayable|()"]
