@@ -229,9 +229,7 @@ def filter_findings(detectors: list) -> list:
         filtered.append(d)
     return filtered
 
-def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Optional[Dict[str, Any]]:
-    if not is_slither_available():
-        return None
+def run_slither(source_code: str, contract_name: str = "Contract.sol", *, require_pragma: bool = False) -> Optional[Dict[str, Any]]:
     if not source_code or not source_code.strip():
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "Empty source", "error_kind": "compile_failed"}
     missing = unsupported_imports(source_code)
@@ -239,16 +237,19 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
         shown = ", ".join(missing[:5])
         extra = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Unsupported import: {shown}{extra}. Result is model-only.", "error_kind": "unsupported_import", "unresolved_imports": missing}
+    pragma_match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+    if require_pragma and not pragma_match:
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
     selected_version = _extract_solc_version(source_code)
     if not selected_version:
-        pragma_match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
-        pragma_spec = pragma_match.group(1).strip() if pragma_match else DEFAULT_SOLC
-        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"No installed Solidity compiler satisfies pragma: {pragma_spec}", "error_kind": "compile_failed"}
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
     solc_ver, solc_bin = _resolve_solc_binary(selected_version)
     if not solc_bin:
-        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Solidity compiler {selected_version} is not installed.", "error_kind": "compile_failed"}
-    source = _normalize_pragma(rewritten, version=solc_ver)
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
+    if not is_slither_available():
+        return None
+    source = rewritten if require_pragma else _normalize_pragma(rewritten, version=solc_ver)
     fname = _safe_filename(contract_name)
     with tempfile.TemporaryDirectory(prefix="sv_slither_") as tmp:
         tmp_path = Path(tmp)
@@ -480,7 +481,7 @@ def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
         entries = list(re.finditer(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", body))
         entries += [m for keyword in ("receive", "fallback") for m in re.finditer(rf"\b{keyword}\s*\(", body)]
         for entry in entries:
-            name = entry.group(1) if entry.group(1) else entry.group(0).split("(")[0].strip()
+            name = entry.group(1) if entry.lastindex else entry.group(0).split("(")[0].strip()
             open_paren = entry.end() - 1
             header, kind = _header_after_params(body, open_paren)
             if kind != "body" or not _is_public_header(header):
@@ -550,7 +551,32 @@ def verify_patch(
     if not patched_code or not patched_code.strip():
         base["patch_verification_details"] = "No patched code provided."
         return base
-    result = run_slither(patched_code, contract_name)
+    if not original_code or not original_code.strip():
+        base.update({"patch_verification_status": "failed", "verification_error_kind": "baseline_unavailable", "patch_verification_details": "Original contract unavailable; detector and public/external interface baselines cannot be verified."})
+        return base
+    if original_entry_points is None:
+        original_entry_points = public_entry_points(original_code)
+    if target_checks is None:
+        baseline = run_slither(original_code, contract_name, require_pragma=True)
+        if baseline is None:
+            base.update({"patch_verification_status": "slither_unavailable", "verification_error_kind": "slither_unavailable", "patch_verification_details": "Slither unavailable; original detector baseline could not be established. Patch is not verified."})
+            return base
+        if not baseline.get("success"):
+            reason = baseline.get("error") or "Slither baseline analysis unavailable."
+            details = reason if reason == "unverified: no compatible compiler installed." else "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]
+            error_kind = "compile_failed" if reason == "unverified: no compatible compiler installed." else baseline.get("error_kind") or "baseline_unavailable"
+            base.update({"patch_verification_status": "failed", "verification_error_kind": error_kind, "patch_verification_details": details})
+            return base
+        baseline_findings = baseline.get("filtered_detectors")
+        if baseline_findings is None:
+            baseline_findings = baseline.get("detectors") or []
+        baseline_security_checks = {d.get("check") for d in baseline_findings if d.get("check")}
+        baseline_security_checks.update(
+            d.get("check") for d in (baseline.get("detectors") or [])
+            if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")
+        )
+        target_checks = sorted(baseline_security_checks)
+    result = run_slither(patched_code, contract_name, require_pragma=True)
     if result is None:
         base.update({"patch_verification_status": "slither_unavailable", "verification_error_kind": "slither_unavailable", "patch_verification_details": "Patch generated by Muse Spark, awaiting Slither re-verification."})
         return base
@@ -562,35 +588,30 @@ def verify_patch(
         base.update({
             "patch_verification_status": "model_only" if model_only else "failed",
             "verification_error_kind": kind,
-            "patch_verification_details": ("Model-only result — not verified. Unresolved imports: " + ", ".join(unresolved)) if model_only else "Could not compile/verify patch with Slither: " + err,
+            "patch_verification_details": ("Model-only result — not verified. Unresolved imports: " + ", ".join(unresolved)) if model_only else (err if err == "unverified: no compatible compiler installed." else "Could not compile/verify patch with Slither: " + err),
             "unresolved_imports": unresolved,
         })
         return base
     high_medium = high_medium_check_names(result.get("detectors") or [])
-    missing: List[str] = []
-    if original_entry_points:
-        missing = sorted(set(original_entry_points) - set(public_entry_points(patched_code)))
+    critical_high_medium = sorted({d["check"] for d in (result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
+    detected_checks = set(result.get("detector_checks") or [])
+    still_present = sorted(set(target_checks or []) & detected_checks)
+    missing: List[str] = sorted(set(original_entry_points or []) - set(public_entry_points(patched_code)))
     gutted = gutted_entry_points(original_code, patched_code)
-    base.update({"remaining_checks": high_medium, "surface_removed": missing, "gutted_functions": gutted, "behaviour_lite_passed": not gutted})
-    if high_medium:
-        details = "Patch still has High/Medium Slither findings: " + ", ".join(high_medium)
-        if missing:
-            details += ". Also removed public functions: " + ", ".join(missing)
-        if gutted:
-            details += ". Gutted preserved entry points: " + ", ".join(gutted)
-        base.update({"patch_verification_status": "failed", "patch_verification_details": details})
+    remaining = sorted(set(critical_high_medium) | set(still_present))
+    base.update({"remaining_checks": remaining, "surface_removed": missing, "gutted_functions": gutted, "behaviour_lite_passed": not gutted})
+    if still_present:
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Original Slither detector IDs remain: " + ", ".join(still_present) + "."})
+        return base
+    if critical_high_medium:
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Patch introduces or retains Critical/High/Medium Slither findings: " + ", ".join(critical_high_medium) + "."})
         return base
     if missing:
-        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither reports no High/Medium issues, but public functions were removed: " + ", ".join(missing) + ". Deleting an entry point is not a fix."})
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither re-scan is clean, but original public/external functions were removed: " + ", ".join(missing) + ". Deleting an entry point is not a fix."})
         return base
     if gutted:
-        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither re-scan is clean, but preserved public entry points were gutted: " + ", ".join(gutted) + "."})
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither re-scan is clean, but preserved public/external entry points were gutted: " + ", ".join(gutted) + "."})
         return base
-    if target_checks:
-        still_present = [c for c in target_checks if c in (result.get("detector_checks") or [])]
-        if still_present:
-            base.update({"patch_verification_status": "failed", "patch_verification_details": "Patch still triggers Slither detectors: " + ", ".join(still_present), "remaining_checks": [c for c in still_present if c in high_medium]})
-            return base
     base.update({
         "patch_verified": True, "patch_verification_status": "verified", "behaviour_lite_passed": True,
         "patch_verification_details": "Slither re-scan found no High/Medium issues; name + parameter types surface is preserved; behaviour-lite check passed.",
