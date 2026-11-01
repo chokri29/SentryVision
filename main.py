@@ -1,4 +1,7 @@
 import difflib
+import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -6,6 +9,7 @@ import re
 import time
 import uuid
 from collections import defaultdict, deque
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional
 
@@ -15,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from redis import Redis
 
 try:
     from slither_runner import run_slither, verify_patch, is_slither_available, public_entry_points
@@ -63,7 +68,11 @@ REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
 MAX_PATCH_VERIFICATIONS = int(os.getenv("MAX_PATCH_VERIFICATIONS", "3"))
-MAX_PATCH_RETRIES = 1
+MAX_PATCH_RETRIES = max(0, int(os.getenv("MAX_PATCH_RETRIES", "1")))
+MAX_DAILY_AI_CALLS = max(1, int(os.getenv("MAX_DAILY_AI_CALLS", "100")))
+REDIS_URL = os.getenv("REDIS_URL")
+RATE_LIMIT_HMAC_KEY = os.getenv("RATE_LIMIT_HMAC_KEY") or os.getenv("LLM_API_KEY") or "local-development-only"
+TRUST_CF_CONNECTING_IP = os.getenv("TRUST_CF_CONNECTING_IP", "false").strip().lower() in {"1", "true", "yes", "on"}
 ANALYSIS_TTL_SECONDS = int(os.getenv("ANALYSIS_TTL_SECONDS", "3600"))
 ANALYSIS_STORE_MAX = int(os.getenv("ANALYSIS_STORE_MAX", "200"))
 
@@ -133,6 +142,11 @@ class Finding(BaseModel):
     why_it_matters: str
     what_to_do: str
     mermaid_diagram: str
+    slither_check: Optional[str] = None
+    slither_impact: Optional[str] = None
+    slither_confidence: Optional[str] = None
+    slither_lines: list[int] = Field(default_factory=list)
+    grounding_status: Literal["grounded", "ungrounded", "f1_unavailable"] = "ungrounded"
     patched_code: Optional[str] = None
     patch_verified: bool = False
     patch_verification_status: Literal[
@@ -210,24 +224,68 @@ class RetryLLMOutput(BaseModel):
 RATE_LIMIT_WINDOW_SECONDS = 60
 MAX_REQUESTS_PER_WINDOW = 6
 request_history: dict[str, deque[float]] = defaultdict(deque)
+daily_request_counts: dict[str, int] = defaultdict(int)
+_redis_client = None
+
+
+def _redis():
+    global _redis_client
+    if not REDIS_URL:
+        return None
+    if _redis_client is None:
+        _redis_client = Redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+    return _redis_client
 
 
 def enforce_rate_limit(client_ip: str) -> None:
     now = time.monotonic()
-    history = request_history[client_ip]
-    while history and now - history[0] > RATE_LIMIT_WINDOW_SECONDS:
-        history.popleft()
-    if len(history) >= MAX_REQUESTS_PER_WINDOW:
+    ip_digest = hmac.new(RATE_LIMIT_HMAC_KEY.encode(), client_ip.encode(), hashlib.sha256).hexdigest()[:32]
+    try:
+        store = _redis()
+        if store:
+            minute_key = f"sv:rate:{ip_digest}:{int(time.time() // 60)}"
+            daily_key = f"sv:daily-ai:{date.today().isoformat()}"
+            script = """
+            local minute = redis.call('INCR', KEYS[1])
+            if minute == 1 then redis.call('EXPIRE', KEYS[1], 120) end
+            local daily = redis.call('INCR', KEYS[2])
+            if daily == 1 then redis.call('EXPIRE', KEYS[2], 172800) end
+            return {minute, daily}
+            """
+            minute_count, daily_count = store.eval(script, 2, minute_key, daily_key)
+        else:
+            history = request_history[ip_digest]
+            while history and now - history[0] >= RATE_LIMIT_WINDOW_SECONDS:
+                history.popleft()
+            history.append(now)
+            today = date.today().isoformat()
+            daily_request_counts[today] += 1
+            minute_count, daily_count = len(history), daily_request_counts[today]
+    except Exception as exc:
+        logger.exception("Rate-limit backend failed")
+        if os.getenv("REQUIRE_REDIS_RATE_LIMIT", "false").lower() in {"1", "true", "yes", "on"}:
+            raise HTTPException(status_code=503, detail="Usage protection is temporarily unavailable. Please try again later.") from exc
+        history = request_history[ip_digest]
+        while history and now - history[0] >= RATE_LIMIT_WINDOW_SECONDS:
+            history.popleft()
+        history.append(now)
+        today = date.today().isoformat()
+        daily_request_counts[today] += 1
+        minute_count, daily_count = len(history), daily_request_counts[today]
+    if minute_count > MAX_REQUESTS_PER_WINDOW:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a minute.")
-    history.append(now)
+    if daily_count > MAX_DAILY_AI_CALLS:
+        raise HTTPException(status_code=429, detail="Daily AI usage limit reached. Please try again tomorrow.")
 
 
 def get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    if TRUST_CF_CONNECTING_IP:
+        candidate = request.headers.get("cf-connecting-ip", "").strip()
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            logger.warning("Trusted edge IP header missing or invalid; falling back to socket peer")
     return request.client.host if request.client else "unknown"
-
 
 def _prune_analysis_store(now: Optional[float] = None) -> None:
     now = time.time() if now is None else now
@@ -245,18 +303,11 @@ def new_analysis_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
-def store_analysis(* , analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
+def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, findings: list, original_high_medium_checks: Optional[list], slither_error: Optional[str], model_used: str, summary: str, retry_count: int = 0) -> None:
     _prune_analysis_store()
-    serialized = []
-    for f in findings:
-        if hasattr(f, "model_dump"):
-            serialized.append(f.model_dump())
-        elif isinstance(f, dict):
-            serialized.append(f)
-        else:
-            serialized.append(dict(f))
-    prev = analysis_store.get(analysis_id) or {}
-    analysis_store[analysis_id] = {
+    serialized = [f.model_dump() if hasattr(f, "model_dump") else dict(f) for f in findings]
+    prev = get_analysis(analysis_id) or {}
+    row = {
         "created_at": prev.get("created_at", time.time()),
         "original_code": original_code,
         "contract_name": contract_name,
@@ -267,18 +318,36 @@ def store_analysis(* , analysis_id: str, original_code: str, contract_name: str,
         "model_used": model_used,
         "retry_count": int(retry_count),
     }
+    store = _redis()
+    if store:
+        store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+    else:
+        analysis_store[analysis_id] = row
 
 
 def get_analysis(analysis_id: str) -> Optional[dict[str, Any]]:
+    try:
+        store = _redis()
+        if store:
+            raw = store.get(f"sv:analysis:{analysis_id}")
+            return json.loads(raw) if raw else None
+    except Exception:
+        logger.exception("Could not retrieve shared analysis state")
+        return None
     _prune_analysis_store()
     row = analysis_store.get(analysis_id)
-    if not row:
-        return None
-    if time.time() - float(row.get("created_at", 0)) > ANALYSIS_TTL_SECONDS:
+    if not row or time.time() - float(row.get("created_at", 0)) > ANALYSIS_TTL_SECONDS:
         analysis_store.pop(analysis_id, None)
         return None
     return row
 
+
+def update_analysis(analysis_id: str, row: dict[str, Any]) -> None:
+    store = _redis()
+    if store:
+        store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+    else:
+        analysis_store[analysis_id] = row
 
 def _unified_diff(original: str, patched: str, max_lines: int = 120) -> str:
     lines = list(difflib.unified_diff((original or "").splitlines(), (patched or "").splitlines(), fromfile="original.sol", tofile="failed_patch.sol", lineterm=""))
@@ -355,16 +424,15 @@ def format_slither_for_prompt(detectors: list) -> str:
     if not detectors:
         return "(no Slither findings)"
     lines = []
-    for d in detectors[:20]:
+    for d in detectors[:30]:
         check = d.get("check") or d.get("name") or "unknown"
         impact = d.get("impact") or "?"
-        conf = d.get("confidence") or "?"
-        desc = (d.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > 220:
-            desc = desc[:220] + "…"
-        lines.append(f"- [{impact}/{conf}] {check}: {desc}")
-    return "\n".join(lines)
-
+        confidence = d.get("confidence") or "?"
+        source_lines = d.get("lines") or []
+        line_label = ", ".join(str(n) for n in source_lines[:12]) if source_lines else "not mapped"
+        desc = (d.get("description") or "").strip().replace("\\n", " ")
+        lines.append(f"- [{impact}/{confidence}] {check} (lines: {line_label}): {desc[:220]}")
+    return "\\n".join(lines)
 
 def classify_patch_verification(*, patched_code: Optional[str], original_code: Optional[str], patch_verification_status: str, verification_error_kind: Optional[str], remaining_checks: Optional[list], original_high_medium_checks: Optional[Iterable[str]], retry_count: int, surface_removed: Optional[Iterable[str]] = None, gutted_functions: Optional[Iterable[str]] = None) -> dict:
     code = (patched_code or "").strip()
