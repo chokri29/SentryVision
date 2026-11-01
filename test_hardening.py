@@ -95,3 +95,57 @@ def test_unmatched_model_finding_is_explicitly_ungrounded():
         why_it_matters="y", what_to_do="z", mermaid_diagram="graph TD; A-->B",
     )
     assert finding.grounding_status == "ungrounded"
+
+
+def test_retry_endpoint_allows_one_eligible_retry_then_exhausts(monkeypatch):
+    from fastapi import HTTPException
+
+    row = {
+        "created_at": 1,
+        "retry_count": 0,
+        "findings": [{
+            "title": "Reentrancy", "severity": "High",
+            "what_happens": "External call before state update",
+            "why_it_matters": "Funds may be drained", "what_to_do": "Use CEI",
+            "mermaid_diagram": "graph TD; A-->B",
+            "grounding_status": "grounded", "slither_check": "reentrancy-eth",
+            "slither_impact": "High", "slither_confidence": "High", "slither_lines": [8, 9],
+        }],
+        "original_code": "contract Vault { function withdraw() external {} }",
+        "original_high_medium_checks": ["reentrancy-eth"],
+        "slither_error": None,
+        "summary": "Reentrancy",
+        "consolidated_patch": {
+            "code": "contract Vault { function withdraw() external {} }",
+            "diff": "--- original.sol", "failure_kind": "still_vulnerable",
+            "verification_status": "failed", "retry_available": True,
+            "remaining_checks": ["reentrancy-eth"], "verification_details": "Detector remains",
+        },
+    }
+    monkeypatch.setattr(main, "enforce_rate_limit", lambda _ip: None)
+    monkeypatch.setattr(main, "get_analysis", lambda _analysis_id: row)
+    monkeypatch.setattr(main.retry_client, "_ensure", lambda: SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "consolidated_patch": "contract Vault { function withdraw() external { require(true); } }",
+                "change_summary": "Repaired", "unable_to_fix": False, "unable_reason": None,
+            })))]
+        )))
+    ))
+    monkeypatch.setattr(main, "verify_consolidated_patch", lambda *a, **k: main.ConsolidatedPatch(
+        code="contract Vault { function withdraw() external { require(true); } }",
+        diff="--- original.sol", patch_verified=True, verification_status="verified",
+        change_summary="Repaired",
+    ))
+    monkeypatch.setattr(main, "update_analysis", lambda _analysis_id, updated: row.update(updated))
+    client = TestClient(main.app)
+
+    first = client.post("/analyze/test-id/retry-patch")
+    assert first.status_code == 200
+    assert first.json()["meta"]["retry_count"] == 1
+    assert first.json()["meta"]["retry_available"] is False
+    assert row["retry_count"] == 1
+
+    second = client.post("/analyze/test-id/retry-patch")
+    assert second.status_code == 400
+    assert "exhausted" in second.json()["detail"].lower()
