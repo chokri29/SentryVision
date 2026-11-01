@@ -243,6 +243,8 @@ def enforce_rate_limit(client_ip: str) -> None:
     ip_digest = hmac.new(RATE_LIMIT_HMAC_KEY.encode(), client_ip.encode(), hashlib.sha256).hexdigest()[:32]
     try:
         store = _redis()
+        if not store and os.getenv("REQUIRE_REDIS_RATE_LIMIT", "false").lower() in {"1", "true", "yes", "on"}:
+            raise HTTPException(status_code=503, detail="Shared usage protection is not configured.")
         if store:
             minute_key = f"sv:rate:{ip_digest}:{int(time.time() // 60)}"
             daily_key = f"sv:daily-ai:{date.today().isoformat()}"
