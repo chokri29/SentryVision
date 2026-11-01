@@ -57,6 +57,9 @@ def installed_solc_versions() -> List[str]:
     home_root = Path.home() / ".solc-select"
     if home_root not in roots:
         roots.append(home_root)
+    for extra in (Path("/usr/local/lib/solc-select"), Path("/opt/solc-select")):
+        if extra not in roots:
+            roots.append(extra)
     for root in roots:
         artifacts = root / "artifacts"
         if not artifacts.is_dir():
@@ -95,8 +98,10 @@ def install_solc(version: str) -> Optional[Path]:
         return None
 
 
-def extract_solc_version(source_code: str) -> Optional[str]:
+def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
     match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+    if require_pragma and not match:
+        return None
     spec = match.group(1).strip() if match else DEFAULT_SOLC
     try:
         constraint = NpmSpec(spec)
