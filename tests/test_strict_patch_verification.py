@@ -74,7 +74,7 @@ def test_patch_without_pragma_fails_closed(monkeypatch):
     )
 
     assert result["success"] is False
-    assert result["error"] == "unverified: no compatible compiler installed."
+    assert result["error"] == "unverified: patch has no Solidity pragma."
 
 
 def test_original_detector_ids_must_disappear(monkeypatch):
@@ -101,7 +101,7 @@ def test_new_high_medium_finding_is_rejected(monkeypatch):
     )
 
     assert result["patch_verified"] is False
-    assert "High/Medium" in result["patch_verification_details"]
+    assert "Critical/High/Medium" in result["patch_verification_details"]
 
 
 def test_missing_overloaded_public_function_is_rejected(monkeypatch):
@@ -112,7 +112,7 @@ def test_missing_overloaded_public_function_is_rejected(monkeypatch):
     result = _verify(monkeypatch, patched, target_checks=[])
 
     assert result["patch_verified"] is False
-    assert result["surface_removed"] == ["set(address)"]
+    assert result["surface_removed"] == ["set(address)|nonpayable|()"]
 
 
 def test_patch_is_verified_only_when_all_gates_pass(monkeypatch):
@@ -155,7 +155,7 @@ def test_receive_and_fallback_are_preserved_entry_points(monkeypatch):
     )
 
     assert result["patch_verified"] is False
-    assert result["surface_removed"] == ["receive()"]
+    assert result["surface_removed"] == ["receive()|payable|()"]
 
 
 def test_original_detector_baseline_is_derived_when_not_supplied(monkeypatch):
@@ -211,3 +211,12 @@ def test_path_compiler_is_not_assumed_compatible_when_artifact_missing(monkeypat
 def test_require_pragma_rejects_missing_pragma_even_when_default_is_installed(monkeypatch):
     monkeypatch.setattr(slither_runner, "_installed_solc_versions", lambda: ["0.8.20"])
     assert slither_runner._extract_solc_version("contract C {}", require_pragma=True) is None
+
+
+def test_verify_patch_propagates_missing_pragma_reason_verbatim(monkeypatch):
+    no_pragma = "contract C { function f() external {} }"
+    monkeypatch.setattr(slither_runner, "is_slither_available", lambda: True)
+    result = verify_patch(no_pragma, target_checks=[], original_code=ORIGINAL)
+    assert result["patch_verified"] is False
+    assert result["patch_verification_details"] == "unverified: patch has no Solidity pragma."
+
