@@ -246,16 +246,24 @@ def enforce_rate_limit(client_ip: str) -> None:
         if not store and os.getenv("REQUIRE_REDIS_RATE_LIMIT", "false").lower() in {"1", "true", "yes", "on"}:
             raise HTTPException(status_code=503, detail="Shared usage protection is not configured.")
         if store:
-            minute_key = f"sv:rate:{ip_digest}:{int(time.time() // 60)}"
+            minute_key = f"sv:rate:{ip_digest}"
             daily_key = f"sv:daily-ai:{date.today().isoformat()}"
+            now_ms = int(time.time() * 1000)
+            member = f"{now_ms}:{time.time_ns()}"
             script = """
-            local minute = redis.call('INCR', KEYS[1])
-            if minute == 1 then redis.call('EXPIRE', KEYS[1], 120) end
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1] - ARGV[2])
+            local count = redis.call('ZCARD', KEYS[1])
+            if count >= tonumber(ARGV[3]) then return {-1, 0} end
+            redis.call('ZADD', KEYS[1], ARGV[1], ARGV[4])
+            redis.call('EXPIRE', KEYS[1], 120)
             local daily = redis.call('INCR', KEYS[2])
             if daily == 1 then redis.call('EXPIRE', KEYS[2], 172800) end
-            return {minute, daily}
+            return {count + 1, daily}
             """
-            minute_count, daily_count = store.eval(script, 2, minute_key, daily_key)
+            minute_count, daily_count = store.eval(
+                script, 2, minute_key, daily_key,
+                now_ms, RATE_LIMIT_WINDOW_SECONDS * 1000, MAX_REQUESTS_PER_WINDOW, member,
+            )
         else:
             history = request_history[ip_digest]
             while history and now - history[0] >= RATE_LIMIT_WINDOW_SECONDS:
@@ -275,7 +283,7 @@ def enforce_rate_limit(client_ip: str) -> None:
         today = date.today().isoformat()
         daily_request_counts[today] += 1
         minute_count, daily_count = len(history), daily_request_counts[today]
-    if minute_count > MAX_REQUESTS_PER_WINDOW:
+    if minute_count < 0 or minute_count > MAX_REQUESTS_PER_WINDOW:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a minute.")
     if daily_count > MAX_DAILY_AI_CALLS:
         raise HTTPException(status_code=429, detail="Daily AI usage limit reached. Please try again tomorrow.")
