@@ -447,9 +447,9 @@ def format_slither_for_prompt(detectors: list) -> str:
         confidence = d.get("confidence") or "?"
         source_lines = d.get("lines") or []
         line_label = ", ".join(str(n) for n in source_lines[:12]) if source_lines else "not mapped"
-        desc = (d.get("description") or "").strip().replace("\\n", " ")
+        desc = (d.get("description") or "").strip().replace("\n", " ")
         lines.append(f"- [{impact}/{confidence}] {check} (lines: {line_label}): {desc[:220]}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def classify_patch_verification(*, patched_code: Optional[str], original_code: Optional[str], patch_verification_status: str, verification_error_kind: Optional[str], remaining_checks: Optional[list], original_high_medium_checks: Optional[Iterable[str]], retry_count: int, surface_removed: Optional[Iterable[str]] = None, gutted_functions: Optional[Iterable[str]] = None) -> dict:
     code = (patched_code or "").strip()
