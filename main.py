@@ -602,8 +602,8 @@ def parse_and_validate_model_output(raw: str) -> LLMOutput:
 
 
 SYSTEM_PROMPT = """You are an expert Web3 security auditor. Analyze the Solidity contract using Slither findings as ground-truth signals.
-Return ONLY JSON: {"summary":"string","findings":[{"title":"string","severity":"Critical|High|Medium|Low|Info","what_happens":"string","why_it_matters":"string","what_to_do":"string","mermaid_diagram":"graph TD; A-->B"}],"consolidated_patch":"one complete Solidity contract or null","patch_change_summary":"string"}
-Produce ONE integrated full-contract patch addressing the findings together. Never put code patches inside individual findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. Do not claim the contract is safe.
+Return ONLY JSON: {"summary":"string","findings":[{"title":"string","severity":"Critical|High|Medium|Low|Info","slither_check":"exact Slither check id or null","what_happens":"string","why_it_matters":"string","what_to_do":"string","mermaid_diagram":"graph TD; A-->B"}],"consolidated_patch":"one complete Solidity contract or null","patch_change_summary":"string"}
+For each finding, set slither_check to an exact check id from the supplied Slither signals, or null when no detector directly supports it. Never invent a detector id. The server attaches authoritative impact, confidence, and source lines; do not invent them. Any finding without a matching Slither check is explicitly ungrounded. Produce ONE integrated full-contract patch addressing the findings together. Never put code patches inside individual findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. Do not claim the contract is safe.
 """
 
 USER_TEMPLATE = "Solidity source:\n```solidity\n{code}\n```\n\nSlither signals:\n{slither}\n\nReturn JSON only."
@@ -629,7 +629,11 @@ async def health():
         "base_url": BASE_URL,
         "slither_available": available,
         "slither_enabled": ENABLE_SLITHER,
-        "analysis_store_size": len(analysis_store),
+        "analysis_store_size": len(analysis_store) if not REDIS_URL else None,
+        "shared_storage_configured": bool(REDIS_URL),
+        "distributed_usage_limits": bool(REDIS_URL),
+        "client_ip_source": "cf-connecting-ip" if TRUST_CF_CONNECTING_IP else "socket-peer",
+        "max_daily_ai_calls": MAX_DAILY_AI_CALLS,
         "max_patch_retries": MAX_PATCH_RETRIES,
         "retry_model": RETRY_MODEL_NAME,
         "retry_provider": "Meta Model API",
@@ -671,7 +675,22 @@ def analyze_contract(request: Request, payload: AuditRequest):
             raw_content = completion.choices[0].message.content or ""
             result = parse_and_validate_model_output(raw_content)
             findings = result.findings
+            detector_map = {d.get("check"): d for d in slither_findings if d.get("check")}
             for finding in findings:
+                detector = detector_map.get(finding.slither_check or "")
+                if detector:
+                    finding.grounding_status = "grounded"
+                    finding.slither_check = detector["check"]
+                    finding.slither_impact = detector.get("impact")
+                    finding.slither_confidence = detector.get("confidence")
+                    finding.slither_lines = list(detector.get("lines") or [])
+                    finding.severity = {"Informational": "Info", "Optimization": "Info"}.get(detector.get("impact"), detector.get("impact", "Info"))
+                else:
+                    finding.grounding_status = "ungrounded" if slither_error is None else "f1_unavailable"
+                    finding.slither_check = None
+                    finding.slither_impact = None
+                    finding.slither_confidence = None
+                    finding.slither_lines = []
                 finding.patched_code = None
                 finding.patch_verified = False
                 finding.patch_verification_status = "not_checked"
@@ -680,7 +699,9 @@ def analyze_contract(request: Request, payload: AuditRequest):
             consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_high_medium_checks, slither_error is None, result.patch_change_summary)
             analysis_id = new_analysis_id()
             store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
-            analysis_store[analysis_id]["consolidated_patch"] = consolidated.model_dump()
+            analysis_row = get_analysis(analysis_id) or {}
+            analysis_row["consolidated_patch"] = consolidated.model_dump()
+            update_analysis(analysis_id, analysis_row)
             any_retry = consolidated.retry_available
             return AuditResponse(summary=result.summary, findings=findings, consolidated_patch=consolidated, meta={
                 "analysis_id": analysis_id, "model": MODEL_NAME, "reasoning_repaired": attempt > 0,
@@ -732,18 +753,20 @@ def retry_patch(analysis_id: str, request: Request):
         completion = model_client.chat.completions.create(model=RETRY_MODEL_NAME, messages=messages, temperature=0.1, max_tokens=MAX_OUTPUT_TOKENS, timeout=RETRY_TIMEOUT_SECONDS)
         retry_result = parse_retry_output(completion.choices[0].message.content or "")
     except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=502, detail="Retry model returned invalid JSON. Please try a fresh /analyze.") from exc
+        logger.warning("Muse Wonder returned invalid retry JSON: %s", str(exc)[:200])
+        raise HTTPException(status_code=502, detail="Retry model returned an invalid response. Please try again.") from exc
     except Exception as exc:
         logger.exception("Muse Wonder retry failed")
-        raise HTTPException(status_code=502, detail="Retry model call failed. Please try again.") from exc
+        raise HTTPException(status_code=502, detail="Retry service temporarily unavailable. Please try again.") from exc
     if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
         consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
     else:
         consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_high_medium_checks") or [], row.get("slither_error") is None, retry_result.change_summary, retry_count + 1)
         consolidated.retry_count = retry_count + 1
     consolidated.retry_available = False
-    analysis_store[analysis_id]["consolidated_patch"] = consolidated.model_dump()
-    analysis_store[analysis_id]["retry_count"] = retry_count + 1
+    row["consolidated_patch"] = consolidated.model_dump()
+    row["retry_count"] = retry_count + 1
+    update_analysis(analysis_id, row)
     f1_ran = row.get("slither_error") is None
     return AuditResponse(summary=row.get("summary") or "", findings=[Finding.model_validate(f) for f in findings_data], consolidated_patch=consolidated, meta={
         "analysis_id": analysis_id, "model": RETRY_MODEL_NAME, "retry_model": RETRY_MODEL_NAME,
@@ -760,4 +783,4 @@ def retry_patch(analysis_id: str, request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")), proxy_headers=True, forwarded_allow_ips="*")
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")), proxy_headers=False)
