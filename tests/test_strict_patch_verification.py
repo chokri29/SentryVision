@@ -178,3 +178,36 @@ def test_original_detector_baseline_is_derived_when_not_supplied(monkeypatch):
     assert len(calls) == 2
     assert result["patch_verified"] is False
     assert result["remaining_checks"] == ["original-detector"]
+
+
+
+def test_solc_artifact_lookup_accepts_direct_file_layout(tmp_path, monkeypatch):
+    root = tmp_path / "solc-select"
+    artifact = root / "artifacts" / "solc-0.8.20"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"fake-solc")
+    monkeypatch.setenv("SOLC_SELECT_INSTALL_DIR", str(root))
+    assert slither_runner._solc_artifact_path("0.8.20") == artifact
+
+
+def test_solc_artifact_lookup_accepts_nested_file_layout(tmp_path, monkeypatch):
+    root = tmp_path / "solc-select"
+    artifact = root / "artifacts" / "solc-0.8.20" / "solc-0.8.20"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"fake-solc")
+    monkeypatch.setenv("SOLC_SELECT_INSTALL_DIR", str(root))
+    assert slither_runner._solc_artifact_path("0.8.20") == artifact
+
+
+def test_path_compiler_is_not_assumed_compatible_when_artifact_missing(monkeypatch):
+    monkeypatch.setattr(slither_runner, "_solc_artifact_path", lambda _version: None)
+    monkeypatch.setattr(slither_runner, "_install_solc", lambda _version: None)
+    monkeypatch.setattr(slither_runner.shutil, "which", lambda _name: "/usr/bin/solc")
+    version, binary = slither_runner._resolve_solc_binary("0.8.20")
+    assert version == "0.8.20"
+    assert binary is None
+
+
+def test_require_pragma_rejects_missing_pragma_even_when_default_is_installed(monkeypatch):
+    monkeypatch.setattr(slither_runner, "_installed_solc_versions", lambda: ["0.8.20"])
+    assert slither_runner._extract_solc_version("contract C {}", require_pragma=True) is None
