@@ -44,7 +44,7 @@ RUN solc-select install 0.8.0 0.8.4 0.8.7 0.8.10 0.8.13 0.8.16 0.8.17 0.8.19 0.8
        -o -e /home/appuser/.solc-select/artifacts/solc-0.8.20/solc
 
 USER root
-COPY main.py slither_runner.py index.html ./
+COPY main.py slither_runner.py solc_util.py index.html ./
 COPY examples ./examples
 COPY vendor ./vendor
 RUN chown -R appuser:appuser /app
