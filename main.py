@@ -525,7 +525,7 @@ def verify_patches(findings: list, original_code: Optional[str] = None, original
             f.patch_failure_kind, f.retry_recommended, f.retry_available = c["patch_failure_kind"], c["retry_recommended"], c["retry_available"]
             f.remaining_checks = []
         return findings
-    slither_ready = ENABLE_SLITHER and is_slither_available()
+    slither_ready = ENABLE_SLITHER
     verified_count = 0
     for f in findings:
         code = (f.patched_code or "").strip()
@@ -594,10 +594,10 @@ def verify_consolidated_patch(code: Optional[str], original_code: str, original_
         result.failure_kind = "verification_skipped"
         result.verification_details = MODEL_ONLY_DETAILS
         return result
-    if not ENABLE_SLITHER or not is_slither_available():
+    if not ENABLE_SLITHER:
         result.verification_status = "slither_unavailable"
         result.failure_kind = "infra_error"
-        result.verification_details = "Slither unavailable; patch is not verified."
+        result.verification_details = "Slither disabled; patch is not verified."
         return result
     ratio = len(patch) / max(len(original_code.strip()), 1)
     if ratio < 0.3 or ratio > 3.0:
@@ -696,7 +696,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
             slither_error = slither_result.get("error") or "Slither failed"
         else:
             slither_findings = slither_result.get("filtered_detectors") or slither_result.get("detectors") or []
-            original_detector_checks = sorted(set(slither_result.get("detector_checks") or []))
+            original_detector_checks = sorted({d["check"] for d in slither_findings if d.get("check")})
             original_high_medium_checks = sorted({d["check"] for d in (slither_result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
     else:
         slither_error = "Slither disabled"
@@ -731,7 +731,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
                 finding.patch_verification_status = "not_checked"
                 finding.retry_available = False
                 finding.retry_recommended = False
-            consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_detector_checks, slither_error is None, result.patch_change_summary, original_high_medium_checks=original_high_medium_checks)
+            consolidated = verify_consolidated_patch(result.consolidated_patch, code, original_detector_checks, ENABLE_SLITHER, result.patch_change_summary, original_high_medium_checks=original_high_medium_checks)
             analysis_id = new_analysis_id()
             store_analysis(analysis_id=analysis_id, original_code=code, contract_name=payload.contract_name, findings=findings, original_high_medium_checks=original_high_medium_checks, original_detector_checks=original_detector_checks, slither_error=slither_error, model_used=MODEL_NAME, summary=result.summary)
             analysis_row = get_analysis(analysis_id) or {}
@@ -796,7 +796,7 @@ def retry_patch(analysis_id: str, request: Request):
     if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
         consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
     else:
-        consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_detector_checks"), row.get("slither_error") is None, retry_result.change_summary, retry_count + 1, original_high_medium_checks=row.get("original_high_medium_checks") or [])
+        consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_detector_checks"), ENABLE_SLITHER, retry_result.change_summary, retry_count + 1, original_high_medium_checks=row.get("original_high_medium_checks") or [])
         consolidated.retry_count = retry_count + 1
     consolidated.retry_available = False
     row["consolidated_patch"] = consolidated.model_dump()
