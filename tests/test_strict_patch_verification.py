@@ -122,3 +122,36 @@ def test_patch_is_verified_only_when_all_gates_pass(monkeypatch):
     assert result["remaining_checks"] == []
     assert result["surface_removed"] == []
     assert result["gutted_functions"] == []
+
+
+def test_verify_patch_surfaces_exact_missing_compiler_reason(monkeypatch):
+    monkeypatch.setattr(slither_runner, "_extract_solc_version", lambda _source: None)
+    result = verify_patch(ORIGINAL, original_code=ORIGINAL)
+
+    assert result["patch_verified"] is False
+    assert result["patch_verification_details"] == "unverified: no compatible compiler installed."
+    assert result["verification_error_kind"] == "compile_failed"
+
+
+def test_receive_and_fallback_are_preserved_entry_points(monkeypatch):
+    original = """
+    pragma solidity ^0.8.20;
+    contract Receiver {
+        receive() external payable { }
+        fallback() external { revert(); }
+    }
+    """
+    patched = original.replace("        receive() external payable { }\n", "")
+    monkeypatch.setattr(
+        slither_runner,
+        "run_slither",
+        lambda *_args, **_kwargs: _slither_result(),
+    )
+    result = verify_patch(
+        patched,
+        target_checks=[],
+        original_code=original,
+    )
+
+    assert result["patch_verified"] is False
+    assert result["surface_removed"] == ["receive()"]
