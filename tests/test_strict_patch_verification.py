@@ -17,6 +17,7 @@ def _slither_result(*, detectors=None, detector_checks=None):
     return {
         "success": True,
         "detectors": list(detectors or []),
+        "filtered_detectors": list(detectors or []),
         "detector_checks": list(detector_checks or []),
     }
 
@@ -163,7 +164,10 @@ def test_original_detector_baseline_is_derived_when_not_supplied(monkeypatch):
     def fake_run_slither(source, *_args, **_kwargs):
         calls.append(source)
         checks = ["original-detector"] if source == ORIGINAL else ["original-detector"]
-        return _slither_result(detector_checks=checks)
+        return _slither_result(
+            detectors=[{"check": "original-detector", "impact": "High"}],
+            detector_checks=checks,
+        )
 
     monkeypatch.setattr(slither_runner, "run_slither", fake_run_slither)
     result = verify_patch(
