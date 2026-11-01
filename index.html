@@ -121,6 +121,7 @@
     .field strong { display: block; font-size: 0.78rem; color: #b7c6d6; margin-bottom: 3px; text-transform: uppercase; }
     .field p { margin: 0; color: var(--muted); line-height: 1.5; font-size: 0.92rem; }
     .diagram-wrap { margin-top: 12px; background: #0d131a; border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; padding: 14px; }
+    .diagram-fallback-note { margin: 0 0 10px; color: #fbbf24; font-size: 0.82rem; line-height: 1.4; }
     .empty { text-align: center; color: var(--muted); padding: 18px; border: 1px dashed var(--border); border-radius: 12px; }
     .patch-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
     .patch-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -303,9 +304,9 @@
     function safeDiagramLabel(value, maxLength) {
       return String(value || '')
         .replace(/<[^>]*>/g, ' ')
-        .replace(/[\\r\\n]+/g, ' ')
-        .replace(/[()[\\]{}<>|"'\x60;#]/g, ' ')
-        .replace(/\\s+/g, ' ')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[()[\]{}<>|"'\x60;#]/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim()
         .slice(0, maxLength || 84) || 'Details unavailable';
     }
@@ -321,7 +322,7 @@
         '  C["Potential impact: ' + impact + '"]',
         '  D["Suggested mitigation: ' + fix + '"]',
         '  A --> B --> C --> D'
-      ].join('\\n');
+      ].join('\n');
     }
     function patchStatusClass(status) {
       const s = (status || 'not_checked').toLowerCase();
