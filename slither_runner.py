@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional
 from semantic_version import NpmSpec, Version
 
 from solc_util import (
-    extract_solc_version as _util_extract_solc_version,
     installed_solc_versions as _util_installed_solc_versions,
     install_solc as _util_install_solc,
     resolve_solc_binary as _util_resolve_solc_binary,
@@ -75,7 +74,33 @@ def _installed_solc_versions() -> List[str]:
 
 
 def _extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
-    return _util_extract_solc_version(source_code, require_pragma=require_pragma)
+    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+    if require_pragma and not match:
+        return None
+    spec = match.group(1).strip() if match else DEFAULT_SOLC
+    try:
+        constraint = NpmSpec(spec)
+    except ValueError:
+        logger.warning("Unsupported Solidity pragma constraint: %s", spec)
+        return None
+    matches = [v for v in _installed_solc_versions() if constraint.match(Version(v))]
+    if matches:
+        return sorted(matches, key=Version)[-1]
+    if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", spec):
+        return spec if _install_solc(spec) else None
+    preferred = ("0.8.26", "0.8.24", "0.8.20", "0.8.19", "0.8.17", "0.8.16", "0.8.13", "0.8.10", "0.8.7", "0.8.4", "0.8.0")
+    for candidate in preferred:
+        try:
+            if constraint.match(Version(candidate)) and _install_solc(candidate):
+                return candidate
+        except Exception:
+            continue
+    try:
+        if constraint.match(Version(DEFAULT_SOLC)) and _install_solc(DEFAULT_SOLC):
+            return DEFAULT_SOLC
+    except Exception:
+        pass
+    return None
 
 
 _SOLC_LOCK = threading.Lock()
