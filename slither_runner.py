@@ -461,6 +461,74 @@ def surface_gap(original_code: str, patched_code: str) -> List[str]:
     patched = set(public_entry_points(patched_code))
     return sorted(set(original) - patched)
 
+def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
+    """Conservatively map public/external entry signatures to source bodies."""
+    if not source_code or not source_code.strip():
+        return {}
+    cleaned = _strip_solidity(source_code)
+    found: Dict[str, List[str]] = {}
+    for contract in re.finditer(r"\b(contract|library|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b", cleaned):
+        if contract.group(1) == "interface":
+            continue
+        brace = cleaned.find("{", contract.end())
+        if brace < 0:
+            continue
+        contract_end = _match_brace(cleaned, brace)
+        if contract_end < 0:
+            continue
+        body = _blank_assembly(cleaned[brace + 1:contract_end])
+        entries = list(re.finditer(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", body))
+        entries += [m for keyword in ("receive", "fallback") for m in re.finditer(rf"\b{keyword}\s*\(", body)]
+        for entry in entries:
+            name = entry.group(1) if entry.group(1) else entry.group(0).split("(")[0].strip()
+            open_paren = entry.end() - 1
+            header, kind = _header_after_params(body, open_paren)
+            if kind != "body" or not _is_public_header(header):
+                continue
+            close_paren = _match_paren(body, open_paren)
+            if close_paren < 0:
+                continue
+            open_brace = close_paren + 1 + len(header)
+            if open_brace >= len(body) or body[open_brace] != "{":
+                continue
+            close_brace = _match_brace(body, open_brace)
+            if close_brace < 0:
+                continue
+            signature = f"{name}()" if name in {"receive", "fallback"} else f"{name}({','.join(_param_types_from_list(_params_inside(body, open_paren)))})"
+            found.setdefault(signature, []).append(body[open_brace + 1:close_brace])
+    return found
+
+
+def _is_gutted_body(body: str) -> bool:
+    """Recognize only clear empty/always-reverting bodies; ambiguity fails open."""
+    cleaned = _strip_solidity(body).strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"revert(?:\s*\([^;]*\))?\s*;?", cleaned):
+        return True
+    if re.fullmatch(r"require\s*\(\s*false\s*(?:,\s*.*?)?\s*\)\s*;?", cleaned):
+        return True
+    return False
+
+
+def gutted_entry_points(original_code: Optional[str], patched_code: str) -> List[str]:
+    """Find preserved entry points changed from useful bodies to clear stubs."""
+    if not original_code:
+        return []
+    original = _public_entry_bodies(original_code)
+    patched = _public_entry_bodies(patched_code)
+    gutted: List[str] = []
+    for signature in sorted(set(original) & set(patched)):
+        old_bodies, new_bodies = original[signature], patched[signature]
+        # Ambiguous duplicate extraction is deliberately not treated as evidence.
+        if len(old_bodies) != len(new_bodies):
+            continue
+        for old_body, new_body in zip(old_bodies, new_bodies):
+            if not _is_gutted_body(old_body) and _is_gutted_body(new_body):
+                gutted.append(signature)
+                break
+    return gutted
+
 def high_medium_check_names(detectors: list) -> List[str]:
     """Return the unique High/Medium detector IDs from a Slither result."""
     return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
