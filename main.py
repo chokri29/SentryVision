@@ -640,6 +640,12 @@ async def health():
     available = is_slither_available()
     _prune_analysis_store()
     wonder_configured = bool(RETRY_API_KEY and RETRY_MODEL_NAME)
+    redis_available = False
+    try:
+        store = _redis()
+        redis_available = bool(store and store.ping())
+    except Exception:
+        logger.warning("Shared Redis storage is not reachable")
     return {
         "status": "ok",
         "model": MODEL_NAME,
@@ -648,6 +654,7 @@ async def health():
         "slither_enabled": ENABLE_SLITHER,
         "analysis_store_size": len(analysis_store) if not REDIS_URL else None,
         "shared_storage_configured": bool(REDIS_URL),
+        "shared_storage_available": redis_available,
         "shared_storage_required": REQUIRE_SHARED_STORAGE,
         "distributed_usage_limits": bool(REDIS_URL),
         "client_ip_source": "cf-connecting-ip" if TRUST_CF_CONNECTING_IP else "socket-peer",
