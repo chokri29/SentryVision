@@ -37,13 +37,13 @@ def test_deleting_withdraw_is_a_surface_gap():
 """,
         "",
     )
-    assert surface_gap(original, patched) == ["withdraw(uint256)"]
+    assert surface_gap(original, patched) == ["withdraw(uint256)|nonpayable|()"]
 
 
 def test_downgrade_to_internal_is_a_surface_gap():
     original = _example("01_reentrancy.sol")
     patched = original.replace("function withdraw(uint256 amount) external", "function withdraw(uint256 amount) internal")
-    assert surface_gap(original, patched) == ["withdraw(uint256)"]
+    assert surface_gap(original, patched) == ["withdraw(uint256)|nonpayable|()"]
 
 
 def test_contract_rename_and_param_rewrite_are_not_a_gap():
