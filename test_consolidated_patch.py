@@ -56,4 +56,5 @@ def test_retry_prompt_requests_one_integrated_contract():
     prompt = messages[0]["content"]
     assert "ONE complete Solidity contract patch" in prompt
     assert '"consolidated_patch"' in prompt
-    assert "findings" in messages[1]["content"]
+    assert "FINDINGS:" in messages[1]["content"]
+    assert "Reentrancy" in messages[1]["content"]
