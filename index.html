@@ -479,7 +479,9 @@
         'Patch not verified';
       document.getElementById('consolidatedStatus').textContent = label +
         (patch.remaining_checks && patch.remaining_checks.length ? ' · Remaining: ' + patch.remaining_checks.join(', ') : '');
-      document.getElementById('patchChangeSummary').textContent = patch.change_summary || patch.verification_details || '';
+      const patchDetails = [patch.change_summary, patch.verification_details]
+        .filter(function (value) { return typeof value === 'string' && value.trim(); });
+      document.getElementById('patchChangeSummary').textContent = Array.from(new Set(patchDetails)).join(' · ');
       const diff = document.getElementById('consolidatedDiff');
       const code = document.getElementById('consolidatedCode');
       diff.textContent = patch.diff || '(No diff available.)';
