@@ -52,4 +52,4 @@ EXPOSE 8000
 
 # Shell form so $PORT expands (Render injects PORT).
 # Do NOT set a Start Command in the Render dashboard - leave it empty.
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
