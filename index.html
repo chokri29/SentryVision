@@ -129,6 +129,12 @@
     .patch-toggle { background: var(--panel-2); border: 1px solid var(--border); color: #b7c6d6; border-radius: 8px; padding: 6px 10px; font-size: 0.78rem; cursor: pointer; margin-bottom: 8px; }
     .patch-code { display: none; width: 100%; max-height: 220px; overflow: auto; background: #0d131a; color: #7dd3c7; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem; white-space: pre; }
     .patch-code.open { display: block; }
+    .consolidated-patch { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+    .consolidated-head { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .consolidated-head h2 { margin:0 0 6px; font-size:1.05rem; }
+    .patch-actions { display:flex; flex-wrap:wrap; gap:7px; }
+    .consolidated-patch .patch-code { display:none; max-height:420px; }
+    .consolidated-patch .patch-code.open { display:block; }
     footer { margin-top: 18px; color: #6b7a8c; font-size: 0.8rem; text-align: center; }
   </style>
 </head>
@@ -163,9 +169,16 @@
         <p id="summaryMeta" class="summary-meta"></p>
       </div>
       <div id="retryBar" class="retry-bar">
-        <p id="retryMessage">One or more patches failed Slither re-check. You can retry once with a stronger repair model.</p>
+        <p id="retryMessage">The consolidated patch failed Slither re-check. You can retry once with Muse Wonder.</p>
         <button type="button" id="retryBtn" onclick="retryPatchOnce()">Retry patch once</button>
       </div>
+      <section id="consolidatedPatch" class="consolidated-patch" hidden>
+        <div class="consolidated-head"><div><h2>Consolidated Contract Patch</h2><p id="consolidatedStatus" class="patch-details"></p></div><div class="patch-actions"><button type="button" id="toggleDiffBtn" class="patch-toggle">Show unified diff</button><button type="button" id="toggleCodeBtn" class="patch-toggle">Show full patch</button><button type="button" id="copyPatchBtn" class="patch-toggle">Copy patch</button><button type="button" id="downloadPatchBtn" class="patch-toggle">Download .sol</button></div></div>
+        <p id="patchChangeSummary" class="patch-details"></p>
+        <pre id="consolidatedDiff" class="patch-code"></pre>
+        <pre id="consolidatedCode" class="patch-code"></pre>
+        <p class="patch-details">A passed Slither re-check is a limited static-analysis result, not proof that the contract is secure or behaviorally correct.</p>
+      </section>
       <div id="findings"></div>
     </section>
     <footer>Prototype for the Meta AI Developer Hackathon · Not a formal security audit</footer>
@@ -390,12 +403,47 @@
       btn.disabled = false; btn.textContent = 'Retry patch once';
       bar.classList.add('visible');
     }
+    function renderConsolidatedPatch(patch) {
+      const section = document.getElementById('consolidatedPatch');
+      if (!section) return;
+      if (!patch) { section.hidden = true; return; }
+      section.hidden = false;
+      const status = patch.verification_status || 'not_checked';
+      const label = patch.patch_verified ? 'Passed Slither re-check + surface checks' :
+        status === 'failed' ? 'Failed Slither re-check' :
+        status === 'slither_unavailable' ? 'Not verified — Slither unavailable' :
+        patch.failure_kind === 'verification_skipped' ? 'Not verified — verification skipped' :
+        patch.failure_kind === 'model_no_patch' ? 'No consolidated patch produced' :
+        'Patch not verified';
+      document.getElementById('consolidatedStatus').textContent = label +
+        (patch.remaining_checks && patch.remaining_checks.length ? ' · Remaining: ' + patch.remaining_checks.join(', ') : '');
+      document.getElementById('patchChangeSummary').textContent = patch.change_summary || patch.verification_details || '';
+      const diff = document.getElementById('consolidatedDiff');
+      const code = document.getElementById('consolidatedCode');
+      diff.textContent = patch.diff || '(No diff available.)';
+      code.textContent = patch.code || '(No full contract patch was produced.)';
+      document.getElementById('toggleDiffBtn').onclick = function () { diff.classList.toggle('open'); };
+      document.getElementById('toggleCodeBtn').onclick = function () { code.classList.toggle('open'); };
+      document.getElementById('copyPatchBtn').onclick = async function () {
+        if (!patch.code) return;
+        try { await navigator.clipboard.writeText(patch.code); this.textContent = 'Copied'; }
+        catch (_) { this.textContent = 'Copy unavailable'; }
+      };
+      document.getElementById('downloadPatchBtn').onclick = function () {
+        if (!patch.code) return;
+        const blob = new Blob([patch.code], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a'); link.href = url; link.download = 'sentryvision-consolidated-patch.sol';
+        document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+      };
+    }
     async function renderAuditData(data) {
       const findingsEl = document.getElementById('findings');
       const summaryText = document.getElementById('summaryText');
       const summaryMeta = document.getElementById('summaryMeta');
       const results = document.getElementById('results');
       const findings = Array.isArray(data.findings) ? data.findings : [];
+      renderConsolidatedPatch(data.consolidated_patch || null);
       const meta = data.meta || {};
       const modelOnlyBanner = document.getElementById("modelOnlyBanner");
       const modelOnly = meta.f1_ran === false || String(meta.pipeline_label || "").toLowerCase().includes("model-only") || findings.some(function (finding) { return finding.patch_verification_status === "model_only"; });
