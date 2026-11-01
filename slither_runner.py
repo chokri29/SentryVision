@@ -74,7 +74,7 @@ def _installed_solc_versions() -> List[str]:
 
 
 def _extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
-    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if require_pragma and not match:
         return None
     spec = match.group(1).strip() if match else DEFAULT_SOLC
@@ -86,7 +86,7 @@ def _extract_solc_version(source_code: str, *, require_pragma: bool = False) -> 
     matches = [v for v in _installed_solc_versions() if constraint.match(Version(v))]
     if matches:
         return sorted(matches, key=Version)[-1]
-    if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", spec):
+    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
         return spec if _install_solc(spec) else None
     preferred = ("0.8.26", "0.8.24", "0.8.20", "0.8.19", "0.8.17", "0.8.16", "0.8.13", "0.8.10", "0.8.7", "0.8.4", "0.8.0")
     for candidate in preferred:
@@ -161,7 +161,10 @@ def _install_solc(version: str) -> Optional[Path]:
 
 
 def _resolve_solc_binary(version: Optional[str]):
-    return _util_resolve_solc_binary(version)
+    if not version:
+        return None, None
+    path = _solc_artifact_path(version) or _install_solc(version)
+    return (version, str(path)) if path else (version, None)
 
 
 def _short_error(text: str, limit: int = 240) -> str:
@@ -229,7 +232,7 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
     if require_pragma and not pragma_match:
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
-    selected_version = _extract_solc_version(source_code, require_pragma=require_pragma)
+    selected_version = _extract_solc_version(source_code)
     if not selected_version:
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
     solc_ver, solc_bin = _resolve_solc_binary(selected_version)
