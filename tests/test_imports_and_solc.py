@@ -86,13 +86,8 @@ def test_resolve_solc_uses_artifact_without_solc_select_use(tmp_path, monkeypatc
     assert _solc_artifact_path(version) == binary
 
 
-def test_resolve_solc_falls_back_without_global_switch(monkeypatch):
-    def install(version):
-        if version == "0.8.20":
-            return Path("/opt/solc-0.8.20")
-        return None
-
-    monkeypatch.setattr(slither_runner, "_install_solc", install)
+def test_resolve_solc_does_not_fall_back_to_incompatible_compiler(monkeypatch):
+    monkeypatch.setattr(slither_runner, "_install_solc", lambda _version: None)
     got_version, got_path = _resolve_solc_binary("0.4.11")
-    assert got_version == "0.8.20"
-    assert got_path == "/opt/solc-0.8.20"
+    assert got_version == "0.4.11"
+    assert got_path is None
