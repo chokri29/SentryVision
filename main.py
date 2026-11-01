@@ -578,7 +578,7 @@ def verify_consolidated_patch(code: Optional[str], original_code: str, original_
         result.failure_kind = "verification_skipped"
         result.verification_details = "Patch length abnormal vs original — skipped F3."
         return result
-    checked = verify_patch(patch, original_entry_points=public_entry_points(original_code), original_code=original_code)
+    checked = verify_patch(patch, target_checks=list(original_checks or []), original_entry_points=public_entry_points(original_code), original_code=original_code)
     result.patch_verified = bool(checked.get("patch_verified"))
     result.verification_status = checked.get("patch_verification_status", "failed")
     result.verification_details = (checked.get("patch_verification_details") or "")[:280]
