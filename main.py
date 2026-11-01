@@ -696,8 +696,11 @@ def analyze_contract(request: Request, payload: AuditRequest):
             slither_error = slither_result.get("error") or "Slither failed"
         else:
             slither_findings = slither_result.get("filtered_detectors") or slither_result.get("detectors") or []
-            original_detector_checks = sorted({d["check"] for d in (slither_result.get("filtered_detectors") or []) if d.get("check")})
             original_high_medium_checks = sorted({d["check"] for d in (slither_result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
+            original_detector_checks = sorted(
+                {d["check"] for d in (slither_result.get("filtered_detectors") or []) if d.get("check")}
+                | set(original_high_medium_checks)
+            )
     else:
         slither_error = "Slither disabled"
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": USER_TEMPLATE.format(code=code, slither=format_slither_for_prompt(slither_findings))}]
