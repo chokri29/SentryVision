@@ -230,7 +230,7 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Unsupported import: {shown}{extra}. Result is model-only.", "error_kind": "unsupported_import", "unresolved_imports": missing}
     pragma_match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if require_pragma and not pragma_match:
-        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: patch has no Solidity pragma.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
     selected_version = _extract_solc_version(source_code)
     if not selected_version:
@@ -415,8 +415,35 @@ def _params_inside(body: str, open_paren_index: int) -> str:
                 return body[open_paren_index + 1:i]
     return ""
 
+def _canonical_solidity_type(raw: str) -> str:
+    """Canonicalize Solidity elementary aliases and whitespace in ABI types."""
+    value = _normalize_param_type(raw)
+    value = re.sub(r"\buint\b", "uint256", value)
+    value = re.sub(r"\bint\b", "int256", value)
+    value = re.sub(r"\bbyte\b", "bytes1", value)
+    value = re.sub(r"\s+", "", value)
+    value = re.sub(r"\baddresspayable\b", "address", value)
+    return value
+
+
+def _entry_mutability_canonical(header: str) -> str:
+    for keyword in ("payable", "view", "pure"):
+        if re.search(rf"\b{keyword}\b", header):
+            return keyword
+    return "nonpayable"
+
+
+def _entry_returns(header: str) -> str:
+    match = re.search(r"\breturns\s*\(", header)
+    if not match:
+        return "()"
+    open_idx = header.find("(", match.start())
+    types = [_canonical_solidity_type(t) for t in _param_types_from_list(_params_inside(header, open_idx))]
+    return "(" + ",".join(types) + ")"
+
+
 def public_entry_points(source_code: str) -> List[str]:
-    """Public/external entry signatures: name(type,…), plus receive/fallback."""
+    """Canonical public/external ABI-like surface: name(params)|mutability|(returns)."""
     if not source_code or not source_code.strip():
         return []
     cleaned = _strip_solidity(source_code)
@@ -436,14 +463,14 @@ def public_entry_points(source_code: str) -> List[str]:
             open_paren = func.end() - 1
             header, kind = _header_after_params(body, open_paren)
             if kind == "body" and _is_public_header(header):
-                types = _param_types_from_list(_params_inside(body, open_paren))
-                sigs.add(f"{name}({','.join(types)})")
+                types = [_canonical_solidity_type(t) for t in _param_types_from_list(_params_inside(body, open_paren))]
+                sigs.add(f"{name}({','.join(types)})|{_entry_mutability_canonical(header)}|{_entry_returns(header)}")
         for keyword in ("receive", "fallback"):
             for special in re.finditer(rf"\b{keyword}\s*\(", body):
                 open_paren = special.end() - 1
                 header, kind = _header_after_params(body, open_paren)
                 if kind == "body" and _is_public_header(header):
-                    sigs.add(f"{keyword}()")
+                    sigs.add(f"{keyword}()|{_entry_mutability_canonical(header)}|()")
     return sorted(sigs)
 
 def surface_gap(original_code: str, patched_code: str) -> List[str]:
@@ -486,7 +513,8 @@ def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
             close_brace = _match_brace(body, open_brace)
             if close_brace < 0:
                 continue
-            signature = f"{name}()" if name in {"receive", "fallback"} else f"{name}({','.join(_param_types_from_list(_params_inside(body, open_paren)))})"
+            params = [] if name in {"receive", "fallback"} else [_canonical_solidity_type(t) for t in _param_types_from_list(_params_inside(body, open_paren))]
+            signature = f"{name}({','.join(params)})|{_entry_mutability_canonical(header)}|{_entry_returns(header)}"
             found.setdefault(signature, []).append(body[open_brace + 1:close_brace])
     return found
 
@@ -554,8 +582,9 @@ def verify_patch(
             return base
         if not baseline.get("success"):
             reason = baseline.get("error") or "Slither baseline analysis unavailable."
-            details = reason if reason == "unverified: no compatible compiler installed." else "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]
-            error_kind = "compile_failed" if reason == "unverified: no compatible compiler installed." else baseline.get("error_kind") or "baseline_unavailable"
+            exact_reasons = {"unverified: no compatible compiler installed.", "unverified: patch has no Solidity pragma."}
+            details = reason if reason in exact_reasons else "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]
+            error_kind = "compile_failed" if reason in exact_reasons else baseline.get("error_kind") or "baseline_unavailable"
             base.update({"patch_verification_status": "failed", "verification_error_kind": error_kind, "patch_verification_details": details})
             return base
         baseline_findings = baseline.get("filtered_detectors")
@@ -579,7 +608,7 @@ def verify_patch(
         base.update({
             "patch_verification_status": "model_only" if model_only else "failed",
             "verification_error_kind": kind,
-            "patch_verification_details": ("Model-only result — not verified. Unresolved imports: " + ", ".join(unresolved)) if model_only else (err if err == "unverified: no compatible compiler installed." else "Could not compile/verify patch with Slither: " + err),
+            "patch_verification_details": ("Model-only result — not verified. Unresolved imports: " + ", ".join(unresolved)) if model_only else (err if err in {"unverified: no compatible compiler installed.", "unverified: patch has no Solidity pragma."} else "Could not compile/verify patch with Slither: " + err),
             "unresolved_imports": unresolved,
         })
         return base
@@ -605,6 +634,6 @@ def verify_patch(
         return base
     base.update({
         "patch_verified": True, "patch_verification_status": "verified", "behaviour_lite_passed": True,
-        "patch_verification_details": "Slither re-scan found no High/Medium issues; name + parameter types surface is preserved; behaviour-lite check passed.",
+        "patch_verification_details": "Slither re-scan found no Critical/High/Medium issues; full public/external signature surface is preserved; behaviour-lite check passed.",
     })
     return base
