@@ -6,18 +6,18 @@
 <title>SentryVision — Meta AI Pre-Audit</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
-:root{--bg:#07070f;--panel:rgba(22,18,40,.92);--panel-2:#1a1430;--border:rgba(139,92,246,.22);--text:#f3eefc;--muted:#a89bc4;--accent:#8b5cf6;--glow:rgba(139,92,246,.45);--cyan:#22d3ee;--green:#4ade80;--crit:#f87171}
+:root{--bg:#07070f;--panel:rgba(22,18,40,.92);--panel-2:#1a1430;--border:rgba(139,92,246,.22);--text:#f3eefc;--muted:#a89bc4;--accent:#8b5cf6;--glow:rgba(139,92,246,.45);--cyan:#22d3ee;--green:#4ade80;--crit:#f87171;--meta:#0081FB;--meta-soft:rgba(0,129,251,.18)}
 *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;color:var(--text);min-height:100vh;background:radial-gradient(900px 500px at 50% -5%,rgba(124,58,237,.28),transparent 55%),var(--bg)}
 .wrap{max-width:920px;margin:0 auto;padding:22px 16px 72px}header{text-align:center;margin-bottom:16px}
 .brand{display:inline-flex;align-items:center;gap:10px}h1{margin:0;font-size:1.55rem;letter-spacing:-.03em}
 .tagline{color:var(--muted);font-size:.92rem;max-width:34em;margin:8px auto 0;line-height:1.5}
-.pills{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:14px 0}
-.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:rgba(15,12,28,.85);border:1px solid var(--border);font-size:.74rem;font-weight:600}
-.pill .dot{width:7px;height:7px;border-radius:50%}.pill.slither .dot{background:var(--green)}.pill.model .dot{background:var(--cyan)}.pill.wonder .dot{background:#c084fc}
-.pill .label{color:#8b7eab}.pill.slither .value{color:#86efac}.pill.model .value{color:#67e8f9}.pill.wonder .value{color:#d8b4fe}
-.pill.off .dot{background:var(--crit)}.pill.off .value{color:#fca5a5}
+.pills{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:16px 0}
+.pill{display:inline-flex;align-items:center;gap:9px;padding:9px 16px;border-radius:999px;background:rgba(15,12,28,.9);border:1px solid rgba(139,92,246,.35);font-size:.88rem;font-weight:650;box-shadow:0 2px 12px rgba(0,0,0,.25)}
+.pill .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}.pill.slither .dot{background:var(--green);box-shadow:0 0 8px rgba(74,222,128,.55)}.pill.model .dot{background:var(--meta);box-shadow:0 0 8px rgba(0,129,251,.45)}.pill.wonder .dot{background:var(--meta);box-shadow:0 0 8px rgba(0,129,251,.45)}
+.pill .label{color:#b7a9d4;font-size:.82rem;font-weight:600}.pill.slither .value{color:#86efac;font-size:.9rem;font-weight:700}.pill.model .value{color:var(--meta);font-size:.9rem;font-weight:700}.pill.wonder .value{color:var(--meta);font-size:.9rem;font-weight:700}
+.pill.off .dot{background:var(--crit);box-shadow:none}.pill.off .value{color:#fca5a5}
 .pipeline{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:12px 14px;margin:12px 0 18px;color:var(--muted);font-size:.82rem;line-height:1.55}
-.pipeline strong{color:#ddd6fe}.pipeline em{color:var(--green);font-style:normal;font-weight:600}
+.pipeline strong{color:#ddd6fe}.pipeline em{color:var(--green);font-style:normal;font-weight:600}.meta-brand{color:var(--meta);font-weight:700}
 .hero{display:flex;flex-direction:column;align-items:center;margin:8px 0 20px}
 .orb-wrap{position:relative;width:132px;height:132px;margin-bottom:14px}
 .orb-ring{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;background:linear-gradient(var(--bg),var(--bg)) padding-box,linear-gradient(135deg,#7c3aed,#22d3ee) border-box;opacity:.55}
@@ -27,8 +27,10 @@
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--glow),0 12px 40px rgba(91,33,182,.45)}50%{box-shadow:0 0 0 14px transparent,0 12px 40px rgba(91,33,182,.55)}}
 .stage{width:min(420px,100%)}.track{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
 .fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#7c3aed,#22d3ee);transition:width .5s}
-.labels{display:flex;justify-content:space-between;margin-top:6px;font-size:.7rem;color:#7c6f9e;font-weight:600}
-.labels .active{color:#c4b5fd}.labels .done{color:var(--green)}
+.labels{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px}
+.labels span{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 6px;border-radius:50%;border:1.5px solid rgba(139,92,246,.35);background:rgba(15,12,28,.85);color:#9b8fc0;font-size:.78rem;font-weight:700;letter-spacing:.02em;transition:all .25s}
+.labels .active{color:#fff;border-color:rgba(139,92,246,.85);background:rgba(124,58,237,.35);box-shadow:0 0 14px rgba(139,92,246,.35)}
+.labels .done{color:#052e16;border-color:rgba(74,222,128,.65);background:rgba(74,222,128,.9);box-shadow:0 0 10px rgba(74,222,128,.25)}
 .stage-msg{text-align:center;font-size:.8rem;color:var(--muted);margin-top:4px;min-height:1.2em}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:16px;margin-bottom:16px}
 .samples{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
@@ -55,8 +57,13 @@ textarea{width:100%;min-height:200px;resize:vertical;background:#0c0a16;color:#d
 .diagram{margin-top:10px;padding:10px;border-radius:12px;background:#0a0814;border:1px solid var(--border);overflow-x:auto}
 .fb{font-size:.75rem;color:#fbbf24;margin:0 0 8px}
 pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;font-size:.75rem;color:#c7f9e0;max-height:320px}
-.actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-.actions button{border:1px solid var(--border);background:var(--panel-2);color:#ddd6fe;border-radius:10px;padding:7px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.actions button{border:1.5px solid rgba(139,92,246,.45);background:linear-gradient(180deg,rgba(40,30,70,.95),rgba(22,18,40,.95));color:#f0e9ff;border-radius:12px;padding:10px 16px;font-size:.84rem;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.28);letter-spacing:.01em;transition:transform .15s,border-color .15s,box-shadow .15s}
+.actions button:hover{transform:translateY(-1px);border-color:rgba(139,92,246,.75);box-shadow:0 6px 18px rgba(124,58,237,.25)}
+.actions button:active{transform:translateY(0)}
+.actions button#copyPatchBtn{border-color:rgba(0,129,251,.55);background:linear-gradient(180deg,rgba(0,129,251,.22),rgba(22,18,40,.95));color:#cfe5ff}
+.actions button#downloadPatchBtn{border-color:rgba(74,222,128,.5);background:linear-gradient(180deg,rgba(74,222,128,.18),rgba(22,18,40,.95));color:#c6f6d5}
+.actions button#toggleDiffBtn{border-color:rgba(251,191,36,.5);background:linear-gradient(180deg,rgba(251,191,36,.14),rgba(22,18,40,.95));color:#fde68a}
 .add{color:#86efac}.del{color:#fca5a5}.foot{text-align:center;color:#6b6280;font-size:.72rem;margin-top:28px}
 </style>
 </head>
@@ -71,7 +78,7 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
     <span class="pill wonder" id="pillWonder"><span class="dot"></span><span class="label">Wonder</span><span class="value" id="pillWonderValue">…</span></span>
   </div>
 </header>
-<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 Muse Spark</strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. Retry with Muse Wonder once if needed. Green <em>Passed Slither re-scan + surface check</em> is not a full audit.</div>
+<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 <span class="meta-brand">Muse Spark</span></strong> explains & proposes a fix → <strong>F3 Spither</strong> re-checks the patch. Retry with <span class="meta-brand">Muse Wonder</span> once if needed. Green <em>Passed Spither re-scan + surface check</em> is not a full audit.</div>
 <div class="hero">
   <div class="orb-wrap"><div class="orb-ring"></div>
     <button type="button" class="orb" id="analyzeBtn"><span id="orbIcon">✦</span><span id="orbLabel">Run Audit</span></button>
@@ -90,7 +97,7 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
   </div>
   <p class="hint">Paste a Solidity contract for plain-language findings and visual exploit flows.</p>
   <textarea id="codeInput" spellcheck="false"></textarea>
-  <p class="privacy">Analysis runs on hosted infrastructure (Baseten for Muse Spark; optional Meta model on retry). Do not paste private keys. Rate limits apply.</p>
+  <p class="privacy">Analysis runs on hosted infrastructure (Baseten for <span class="meta-brand">Muse Spark</span>; optional <span class="meta-brand">Muse Wonder</span> on retry). Do not paste private keys. Rate limits apply.</p>
   <div class="status" id="statusLine" role="status"></div>
 </div>
 <div class="retry" id="retryBar"><div id="retryText"></div><button type="button" id="retryBtn">Retry patch once</button></div>
@@ -172,51 +179,70 @@ function card(f,i){
 }
 function renderPatch(patch){
   const panel=document.getElementById("patchPanel");
-  if(!patch||(!(patch.code&&patch.code.trim())&&!(patch.diff&&patch.diff.trim()))){panel.style.display="none";lastPatchCode="";lastPatchDiff="";return;}
-  panel.style.display="block";lastPatchCode=patch.code||"";lastPatchDiff=patch.diff||"";
-  document.getElementById("patchSummary").textContent=patch.change_summary||"";
-  const badges=document.getElementById("patchBadges");badges.replaceChildren();
-  const b=document.createElement("span");b.className="badge "+patchClass(patch.verification_status,patch.patch_verified);b.textContent=patchLabel(patch.verification_status,patch.patch_verified,patch.failure_kind);badges.appendChild(b);
-  if(patch.verification_details){const d=document.createElement("p");d.className="meta";d.textContent=patch.verification_details;badges.appendChild(d);}
+  if(!patch){panel.style.display="none";return;}
+  panel.style.display="block";
+  document.getElementById("patchSummary").textContent=patch.summary||"";
+  const badges=document.getElementById("patchBadges");badges.innerHTML="";
+  const st=document.createElement("span");st.className="badge "+patchClass(patch.status,patch.verified);st.textContent=patchLabel(patch.status,patch.verified,patch.verification_error_kind);badges.appendChild(st);
+  lastPatchCode=patch.code||"";lastPatchDiff=patch.unified_diff||"";
   const codeEl=document.getElementById("patchCode");const diffEl=document.getElementById("patchDiff");
-  codeEl.textContent=lastPatchCode;codeEl.style.display=lastPatchCode?"block":"none";diffEl.style.display="none";
-  if(lastPatchDiff){diffEl.replaceChildren();lastPatchDiff.split("\n").forEach(line=>{const s=document.createElement("div");if(line.startsWith("+")&&!line.startsWith("+++"))s.className="add";else if(line.startsWith("-")&&!line.startsWith("---"))s.className="del";s.textContent=line;diffEl.appendChild(s);});}
+  codeEl.textContent=lastPatchCode;diffEl.textContent=lastPatchDiff;
+  codeEl.style.display=lastPatchCode?"block":"none";diffEl.style.display="none";
+  document.getElementById("toggleDiffBtn").textContent="Show unified diff";
 }
-document.getElementById("copyPatchBtn").onclick=async()=>{if(!lastPatchCode)return;try{await navigator.clipboard.writeText(lastPatchCode);showStatus("ok","Patch copied.");}catch(e){showStatus("error","Copy failed.");}};
-document.getElementById("downloadPatchBtn").onclick=()=>{if(!lastPatchCode)return;const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lastPatchCode],{type:"text/plain"}));a.download="sentryvision_patch.sol";a.click();};
-document.getElementById("toggleDiffBtn").onclick=function(){const d=document.getElementById("patchDiff");const c=document.getElementById("patchCode");const show=d.style.display==="none";d.style.display=show?"block":"none";c.style.display=show?"none":(lastPatchCode?"block":"none");this.textContent=show?"Show patch code":"Show unified diff";};
-async function renderAudit(data){
-  const findings=data.findings||[];const meta=data.meta||{};const patch=data.consolidated_patch||null;
-  lastAnalysisId=meta.analysis_id||null;
-  document.getElementById("summaryText").textContent=data.summary||"";
-  let ml=meta.pipeline_label||"";if(meta.f1_ran===false&&meta.slither_error)ml+=" — "+meta.slither_error;if(typeof meta.slither_findings_count==="number")ml+=(ml?" · ":"")+"Slither signals: "+meta.slither_findings_count;
-  document.getElementById("metaLine").textContent=ml;renderPatch(patch);
-  const box=document.getElementById("findings");box.replaceChildren();
-  if(!findings.length){const p=document.createElement("p");p.className="meta";p.textContent=meta.f1_ran===false?"No finding cards returned (static analysis unavailable or model omitted evidence). This does not prove the contract is safe.":"No findings were returned by Slither or the model. This does not prove the contract is vulnerability-free.";box.appendChild(p);}
-  else{for(let i=0;i<findings.length;i++){const built=card(findings[i],i);box.appendChild(built.card);await renderMermaid(built.host,built.source,findings[i]);}}
-  showRetry(meta,patch);document.getElementById("results").style.display="block";setStage(4,meta.pipeline_label||"Audit complete");setOrb(false);
+function renderAuditData(data){
+  document.getElementById("results").style.display="block";
+  document.getElementById("summaryText").textContent=(data.summary||"").trim()||"No summary returned.";
+  const meta=data.meta||{};const patch=data.patch||null;
+  lastAnalysisId=meta.analysis_id||lastAnalysisId;
+  const signals=meta.slither_signal_count!=null?meta.slither_signal_count:(Array.isArray(data.slither_signals)?data.slither_signals.length:0);
+  let pipeline=meta.pipeline_label||"";
+  if(!pipeline){
+    if(meta.static_analysis_unavailable||meta.verification_error_kind==="verification_skipped")pipeline="Pipeline: F2 only (static analysis unavailable)";
+    else pipeline="F1 Slither → F2 Muse → F3 verify";
+  }
+  document.getElementById("metaLine").textContent=pipeline+(signals!=null?" · Slither signals: "+signals:"");
+  renderPatch(patch);
+  const host=document.getElementById("findings");host.innerHTML="";
+  const findings=Array.isArray(data.findings)?data.findings:[];
+  if(!findings.length){
+    const p=document.createElement("p");p.className="meta";p.textContent="No finding cards returned (static analysis unavailable or model omitted evidence). Absence does not prove the contract is safe.";host.appendChild(p);
+  }else{
+    const jobs=[];
+    findings.forEach((f,i)=>{const {card:c,host:h,source}=card(f,i);host.appendChild(c);jobs.push(renderMermaid(h,source||"",f));});
+    Promise.all(jobs);
+  }
+  showRetry(meta,patch);
+  setStage(4, meta.static_analysis_unavailable?"Complete (model-only)":"Audit complete");
 }
 async function analyze(){
-  const code=(inputEl.value||"").replace(/\r\n/g,"\n");inputEl.value=code;
-  if(!code.trim()){showStatus("error","Please paste some Solidity code first.");return;}
-  clearStatus();startProg();document.getElementById("results").style.display="none";document.getElementById("findings").replaceChildren();hideRetry();lastAnalysisId=null;
+  const code=(inputEl.value||"").trim();
+  if(!code){showStatus("error","Paste a Solidity contract first.");return;}
+  hideRetry();document.getElementById("results").style.display="none";startProg();
   try{
     const r=await fetch("/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({solidity_code:code})});
-    if(!r.ok){let d="Backend failed.";try{d=(await r.json()).detail||d;}catch(e){}if(r.status===429){const ra=Math.max(1,Number(r.headers.get("Retry-After"))||60);d="Rate limit reached. Try again in "+ra+" seconds.";}throw new Error(d);}
-    stopProg();clearStatus();await renderAudit(await r.json());
-  }catch(err){stopProg();setOrb(false);setStage(0,"Ready to retry");showStatus("error",err.message||"Something went wrong.");}
+    const data=await r.json().catch(()=>({}));
+    stopProg();setOrb(false);
+    if(!r.ok){showStatus("error",(data&&data.detail)||("HTTP "+r.status));setStage(0,"Failed");return;}
+    clearStatus();renderAuditData(data);showStatus("ok","Audit finished.");
+  }catch(err){stopProg();setOrb(false);showStatus("error",err.message||"Request failed");setStage(0,"Failed");}
 }
 async function retryOnce(){
-  if(!lastAnalysisId||!lastRetryAvailable){showStatus("error","Retry not available.");return;}
-  const btn=document.getElementById("retryBtn");btn.disabled=true;btn.textContent="Retrying…";setOrb(true);clearStatus();
-  showStatus("loading",(wonderConfigured?"Retry with Muse Wonder":"Retry repair pass")+" + Slither re-check…");setStage(2,"Retry · generating repair…");
+  if(!lastAnalysisId){showStatus("error","No analysis to retry.");return;}
+  const btn=document.getElementById("retryBtn");btn.disabled=true;btn.textContent="Retrying…";
+  setOrb(true);setStage(2,"Retry · Muse Wonder repairing…");showStatus("loading","Retrying patch…");
   try{
-    const r=await fetch("/analyze/"+encodeURIComponent(lastAnalysisId)+"/retry-patch",{method:"POST"});
-    if(!r.ok){let d="Retry failed.";try{d=(await r.json()).detail||d;}catch(e){}if(r.status===429){const ra=Math.max(1,Number(r.headers.get("Retry-After"))||60);d="Rate limit reached. Try again in "+ra+" seconds.";}throw new Error(d);}
-    stopProg();clearStatus();await renderAudit(await r.json());
-  }catch(err){stopProg();setOrb(false);showStatus("error",err.message||"Retry failed.");if(lastRetryAvailable){btn.disabled=false;btn.textContent="Retry patch once";}}
+    const r=await fetch("/retry-patch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis_id:lastAnalysisId})});
+    const data=await r.json().catch(()=>({}));
+    setOrb(false);
+    if(!r.ok){showStatus("error",(data&&data.detail)||("HTTP "+r.status));btn.disabled=false;btn.textContent="Retry patch once";return;}
+    clearStatus();renderAuditData(data);showStatus("ok","Retry finished.");
+  }catch(err){setOrb(false);showStatus("error",err.message||"Retry failed.");if(lastRetryAvailable){btn.disabled=false;btn.textContent="Retry patch once";}}
 }
 analyzeBtn.onclick=analyze;document.getElementById("retryBtn").onclick=retryOnce;
+document.getElementById("copyPatchBtn").onclick=async()=>{try{await navigator.clipboard.writeText(lastPatchCode||"");showStatus("ok","Patch copied.");}catch(e){showStatus("error","Copy failed");}};
+document.getElementById("downloadPatchBtn").onclick=()=>{const blob=new Blob([lastPatchCode||""],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="sentryvision_patch.sol";a.click();URL.revokeObjectURL(a.href);};
+document.getElementById("toggleDiffBtn").onclick=()=>{const d=document.getElementById("patchDiff");const c=document.getElementById("patchCode");const b=document.getElementById("toggleDiffBtn");if(d.style.display==="block"){d.style.display="none";c.style.display=lastPatchCode?"block":"none";b.textContent="Show unified diff";}else{d.style.display="block";c.style.display="none";b.textContent="Show patch code";}};
 loadSample("reentrancy");refreshHealth();setInterval(refreshHealth,60000);
 </script>
 </body>
