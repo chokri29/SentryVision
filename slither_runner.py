@@ -153,6 +153,9 @@ def _extract_solc_version(source_code: str) -> Optional[str]:
             return DEFAULT_SOLC
     except Exception:
         pass
+    # If PATH has solc, still return DEFAULT so resolve can use which(solc)
+    if shutil.which("solc"):
+        return DEFAULT_SOLC
     return None
 
 
@@ -160,7 +163,31 @@ def _resolve_solc_binary(version: Optional[str]):
     if not version:
         return None, None
     path = _solc_artifact_path(version) or _install_solc(version)
-    return (version, str(path)) if path else (version, None)
+    if path:
+        return version, str(path)
+    which = shutil.which("solc")
+    if which:
+        logger.warning("Using PATH solc at %s (requested %s)", which, version)
+        return version, which
+    return version, None
+
+
+def list_solc_versions() -> List[str]:
+    """Installed solc versions visible to F1/F3 (for /health)."""
+    versions = list(_installed_solc_versions())
+    which = shutil.which("solc")
+    if which and not versions:
+        try:
+            proc = subprocess.run([which, "--version"], capture_output=True, text=True, timeout=10)
+            text = (proc.stdout or "") + (proc.stderr or "")
+            m = re.search(r"(\d+\.\d+\.\d+)", text)
+            if m:
+                versions.append(m.group(1) + " (PATH)")
+            else:
+                versions.append("PATH:" + which)
+        except Exception:
+            versions.append("PATH:" + which)
+    return versions
 
 
 def oz_relative(path: str) -> Optional[str]:
@@ -423,6 +450,6 @@ def verify_patch(
         patch_verified=True,
         patch_verification_status="verified",
         behaviour_lite_passed=True,
-        patch_verification_details="Passed Slither re-scan + surface check.",
+        patch_verification_details="Passed Sli ther re-scan + surface check.",
     )
     return base
