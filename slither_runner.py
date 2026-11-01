@@ -461,6 +461,11 @@ def surface_gap(original_code: str, patched_code: str) -> List[str]:
     patched = set(public_entry_points(patched_code))
     return sorted(set(original) - patched)
 
+def high_medium_check_names(detectors: list) -> List[str]:
+    """Return the unique High/Medium detector IDs from a Slither result."""
+    return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
+
+
 def verify_patch(
     patched_code: str,
     target_checks: Optional[List[str]] = None,
