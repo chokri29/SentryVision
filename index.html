@@ -13,9 +13,15 @@
 .tagline{color:var(--muted);font-size:.92rem;max-width:34em;margin:8px auto 0;line-height:1.5}
 .pills{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:16px 0}
 .pill{display:inline-flex;align-items:center;gap:9px;padding:9px 16px;border-radius:999px;background:rgba(15,12,28,.9);border:1px solid rgba(139,92,246,.35);font-size:.88rem;font-weight:650;box-shadow:0 2px 12px rgba(0,0,0,.25)}
-.pill .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}.pill.slither .dot{background:var(--green);box-shadow:0 0 8px rgba(74,222,128,.55)}.pill.model .dot{background:var(--meta);box-shadow:0 0 8px rgba(0,129,251,.45)}.pill.wonder .dot{background:var(--meta);box-shadow:0 0 8px rgba(0,129,251,.45)}
-.pill .label{color:#b7a9d4;font-size:.82rem;font-weight:600}.pill.slither .value{color:#86efac;font-size:.9rem;font-weight:700}.pill.model .value{color:var(--meta);font-size:.9rem;font-weight:700}.pill.wonder .value{color:var(--meta);font-size:.9rem;font-weight:700}
-.pill.off .dot{background:var(--crit);box-shadow:none}.pill.off .value{color:#fca5a5}
+.pill .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--green);box-shadow:0 0 8px rgba(74,222,128,.55);animation:dotPulse 1.6s ease-in-out infinite}
+.pill .label{color:#b7a9d4;font-size:.82rem;font-weight:600}
+.pill .value{color:#86efac;font-size:.9rem;font-weight:700}
+.pill.model .value,.pill.wonder .value{color:var(--meta)}
+.pill.off .dot{background:var(--crit);box-shadow:0 0 8px rgba(248,113,113,.45);animation:dotPulseRed 1.6s ease-in-out infinite}
+.pill.off .value{color:#fca5a5}
+.pill .label.hide{display:none}
+@keyframes dotPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.25);opacity:.75}}
+@keyframes dotPulseRed{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.25);opacity:.7}}
 .pipeline{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:12px 14px;margin:12px 0 18px;color:var(--muted);font-size:.82rem;line-height:1.55}
 .pipeline strong{color:#ddd6fe}.pipeline em{color:var(--green);font-style:normal;font-weight:600}.meta-brand{color:var(--meta);font-weight:700}
 .hero{display:flex;flex-direction:column;align-items:center;margin:8px 0 20px}
@@ -27,10 +33,10 @@
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 var(--glow),0 12px 40px rgba(91,33,182,.45)}50%{box-shadow:0 0 0 14px transparent,0 12px 40px rgba(91,33,182,.55)}}
 .stage{width:min(420px,100%)}.track{height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
 .fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#7c3aed,#22d3ee);transition:width .5s}
-.labels{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:8px}
-.labels span{display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:0 6px;border-radius:50%;border:1.5px solid rgba(139,92,246,.35);background:rgba(15,12,28,.85);color:#9b8fc0;font-size:.78rem;font-weight:700;letter-spacing:.02em;transition:all .25s}
-.labels .active{color:#fff;border-color:rgba(139,92,246,.85);background:rgba(124,58,237,.35);box-shadow:0 0 14px rgba(139,92,246,.35)}
-.labels .done{color:#052e16;border-color:rgba(74,222,128,.65);background:rgba(74,222,128,.9);box-shadow:0 0 10px rgba(74,222,128,.25)}
+.labels{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px}
+.labels span{display:inline-flex;align-items:center;justify-content:center;min-width:22px;width:22px;height:22px;padding:0;border-radius:50%;border:1.5px solid rgba(139,92,246,.35);background:rgba(15,12,28,.85);color:#9b8fc0;font-size:.62rem;font-weight:700;letter-spacing:0;transition:all .25s}
+.labels .active{color:#fff;border-color:rgba(139,92,246,.85);background:rgba(124,58,237,.35);box-shadow:0 0 10px rgba(139,92,246,.3)}
+.labels .done{color:#052e16;border-color:rgba(74,222,128,.65);background:rgba(74,222,128,.9);box-shadow:0 0 8px rgba(74,222,128,.25)}
 .stage-msg{text-align:center;font-size:.8rem;color:var(--muted);margin-top:4px;min-height:1.2em}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:16px;margin-bottom:16px}
 .samples{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
@@ -74,11 +80,11 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
   <p class="tagline">Meta AI–assisted pre-audit triage for developers and non-technical founders.</p>
   <div class="pills">
     <span class="pill slither" id="pillSlither"><span class="dot"></span><span class="label">Slither</span><span class="value" id="pillSlitherValue">…</span></span>
-    <span class="pill model" id="pillModel"><span class="dot"></span><span class="label">Spark</span><span class="value" id="pillModelValue">…</span></span>
-    <span class="pill wonder" id="pillWonder"><span class="dot"></span><span class="label">Wonder</span><span class="value" id="pillWonderValue">…</span></span>
+    <span class="pill model" id="pillModel"><span class="dot"></span><span class="value" id="pillModelValue">…</span></span>
+    <span class="pill wonder" id="pillWonder"><span class="dot"></span><span class="value" id="pillWonderValue">…</span></span>
   </div>
 </header>
-<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 <span class="meta-brand">Muse Spark</span></strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the proposed fixes. Optional <span class="meta-brand">Muse Wonder</span> tries out a rejected patch once. Green <em>Passed Slither re-scan + surface check</em> is not a full audit.</div>
+<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 <span class="meta-brand">Muse Spark</span></strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. Retry with <span class="meta-brand">Muse Wonder</span> once if needed. Green <em>Passed Spither re-scan + surface check</em> is not a full audit.</div>
 <div class="hero">
   <div class="orb-wrap"><div class="orb-ring"></div>
     <button type="button" class="orb" id="analyzeBtn"><span id="orbIcon">✦</span><span id="orbLabel">Run Audit</span></button>
