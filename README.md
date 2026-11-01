@@ -85,13 +85,29 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | Piece | Behavior |
 | --- | --- |
 | **Trigger** | User clicks **Retry patch once** (never auto) |
-| **Server state** | `meta.analysis_id` — original source + findings in memory (~1h TTL) |
+| **Server state** | Redis-backed `meta.analysis_id` — original source + findings with a 1h TTL; local in-memory fallback is for development only |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
 | **Cap** | `MAX_PATCH_RETRIES=1` server-side |
 | **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; retry is enabled only when `LLM_RETRY_API_KEY` is configured |
 | **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; separate Meta client, never the Baseten key. Without the Meta key, the retry action stays unavailable |
 
 Retry does **not** run on identical patches, empty patches, or pure infra failures. The pass label means only the claim above — not "safe to deploy."
+
+### Production usage protection and privacy
+
+For a multi-worker Render deployment, configure a shared Redis service (use a TLS `rediss://` URL):
+
+- `REDIS_URL`: shared Redis connection URL. Retry state is stored with `ANALYSIS_TTL_SECONDS` expiry and shared across workers/restarts.
+- `REQUIRE_SHARED_STORAGE=true`: refuse analysis persistence if Redis is absent; do not silently fall back to process memory.
+- `REQUIRE_REDIS_RATE_LIMIT=true`: fail closed if shared usage protection is unavailable.
+- `MAX_DAILY_AI_CALLS=100`: global daily cap across analysis and retry calls, enforced atomically in Redis.
+- `MAX_PATCH_RETRIES=1`: server-enforced retry limit, now read from the environment.
+- `TRUST_CF_CONNECTING_IP=true`: use only the single-value `CF-Connecting-IP` header supplied by the trusted Cloudflare edge. Confirm this header is present and overwritten by the edge on the deployed Render URL before enabling it. Otherwise the app falls back to the socket peer; it never trusts client-supplied `X-Forwarded-For`.
+- `RATE_LIMIT_HMAC_KEY`: optional dedicated secret used to pseudonymize IP addresses in Redis rate-limit keys.
+
+The six-requests-per-minute per-client limit and daily AI-call cap are distributed when Redis is configured. Without Redis, development uses process-local limits and retry state; these are not suitable for multi-worker production. Redis contains submitted source temporarily for the optional retry, so use an access-controlled TLS endpoint and an appropriate retention policy.
+
+**Provider disclosure:** Solidity source is sent to Baseten for Muse Spark analysis. If the user explicitly requests the optional retry, the original source and patch context are sent to Meta's Model API for Muse Wonder. Do not submit private keys, credentials, or other secrets.
 
 ## Meta models used
 
@@ -133,7 +149,7 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 - F3 claim is compile + Slither re-scan clean (no High/Medium) + name + parameter types surface preserved + behaviour-lite passed. It does not establish behavioural preservation or security.
 - A green pytest suite is test evidence, not proof of complete verification.
 - OZ support is a **vendored OZ subset** with documented supported import paths; it is not audited upstream code and is not claimed equivalent to real OpenZeppelin.
-- Retry store is in-memory.
+- Production retry state and global usage budgets require a configured shared Redis instance; process-local fallback is development-only.\n- Solidity source is transmitted to Baseten for analysis and to Meta only when a user requests the optional Muse Wonder retry.
 
 ## Credits
 
