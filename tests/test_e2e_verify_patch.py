@@ -59,7 +59,7 @@ def test_deleted_withdraw_fails_with_surface_removed(require_solidity_toolchain)
     assert "function withdraw" not in patched
     result = _verify(patched, original)
     assert result["patch_verified"] is False
-    assert "withdraw(uint256)" in result["surface_removed"]
+    assert "withdraw(uint256)|nonpayable|()" in result["surface_removed"]
 
 
 def test_unsupported_import_returns_model_only_unverified(require_solidity_toolchain):
