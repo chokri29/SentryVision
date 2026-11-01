@@ -249,7 +249,7 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: no compatible compiler installed.", "error_kind": "compile_failed"}
     if not is_slither_available():
         return None
-    source = _normalize_pragma(rewritten, version=solc_ver)
+    source = rewritten if require_pragma else _normalize_pragma(rewritten, version=solc_ver)
     fname = _safe_filename(contract_name)
     with tempfile.TemporaryDirectory(prefix="sv_slither_") as tmp:
         tmp_path = Path(tmp)
@@ -481,7 +481,7 @@ def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
         entries = list(re.finditer(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", body))
         entries += [m for keyword in ("receive", "fallback") for m in re.finditer(rf"\b{keyword}\s*\(", body)]
         for entry in entries:
-            name = entry.group(1) if entry.group(1) else entry.group(0).split("(")[0].strip()
+            name = entry.group(1) if entry.lastindex else entry.group(0).split("(")[0].strip()
             open_paren = entry.end() - 1
             header, kind = _header_after_params(body, open_paren)
             if kind != "body" or not _is_public_header(header):
@@ -560,7 +560,9 @@ def verify_patch(
         baseline = run_slither(original_code, contract_name, require_pragma=True)
         if not baseline or not baseline.get("success"):
             reason = (baseline or {}).get("error") or "Slither baseline analysis unavailable."
-            base.update({"patch_verification_status": "failed", "verification_error_kind": "baseline_unavailable", "patch_verification_details": "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]})
+            details = reason if reason == "unverified: no compatible compiler installed." else "Original detector baseline unavailable; patch is not verified: " + str(reason)[:180]
+            error_kind = "compile_failed" if reason == "unverified: no compatible compiler installed." else "baseline_unavailable"
+            base.update({"patch_verification_status": "failed", "verification_error_kind": error_kind, "patch_verification_details": details})
             return base
         target_checks = list(baseline.get("detector_checks") or [])
     result = run_slither(patched_code, contract_name, require_pragma=True)
@@ -580,17 +582,18 @@ def verify_patch(
         })
         return base
     high_medium = high_medium_check_names(result.get("detectors") or [])
+    critical_high_medium = sorted({d["check"] for d in (result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
     detected_checks = set(result.get("detector_checks") or [])
     still_present = sorted(set(target_checks or []) & detected_checks)
     missing: List[str] = sorted(set(original_entry_points or []) - set(public_entry_points(patched_code)))
     gutted = gutted_entry_points(original_code, patched_code)
-    remaining = sorted(set(high_medium) | set(still_present))
+    remaining = sorted(set(critical_high_medium) | set(still_present))
     base.update({"remaining_checks": remaining, "surface_removed": missing, "gutted_functions": gutted, "behaviour_lite_passed": not gutted})
     if still_present:
         base.update({"patch_verification_status": "failed", "patch_verification_details": "Original Slither detector IDs remain: " + ", ".join(still_present) + "."})
         return base
-    if high_medium:
-        base.update({"patch_verification_status": "failed", "patch_verification_details": "Patch introduces or retains High/Medium Slither findings: " + ", ".join(high_medium) + "."})
+    if critical_high_medium:
+        base.update({"patch_verification_status": "failed", "patch_verification_details": "Patch introduces or retains Critical/High/Medium Slither findings: " + ", ".join(critical_high_medium) + "."})
         return base
     if missing:
         base.update({"patch_verification_status": "failed", "patch_verification_details": "Slither re-scan is clean, but original public/external functions were removed: " + ", ".join(missing) + ". Deleting an entry point is not a fix."})
