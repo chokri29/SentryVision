@@ -149,3 +149,18 @@ def test_retry_endpoint_allows_one_eligible_retry_then_exhausts(monkeypatch):
     second = client.post("/analyze/test-id/retry-patch")
     assert second.status_code == 400
     assert "exhausted" in second.json()["detail"].lower()
+
+
+def test_redis_daily_ai_budget_is_global_and_enforced(monkeypatch):
+    class FakeRedis:
+        def eval(self, *_args):
+            return [2, 101]
+
+    monkeypatch.setattr(main, "_redis", lambda: FakeRedis())
+    monkeypatch.setattr(main, "MAX_DAILY_AI_CALLS", 100)
+    from fastapi import HTTPException
+    import pytest
+    with pytest.raises(HTTPException) as exc:
+        main.enforce_rate_limit("198.51.100.7")
+    assert exc.value.status_code == 429
+    assert "Daily AI usage limit" in exc.value.detail
