@@ -27,12 +27,9 @@ def solc_artifact_path(version: str) -> Optional[Path]:
     env_root = os.getenv("SOLC_SELECT_INSTALL_DIR")
     if env_root:
         roots.append(Path(env_root))
-    home_root = Path.home() / ".solc-select"
-    if home_root not in roots:
-        roots.append(home_root)
-    for extra in (Path("/usr/local/lib/solc-select"), Path("/opt/solc-select")):
-        if extra not in roots:
-            roots.append(extra)
+    else:
+        roots.append(Path.home() / ".solc-select")
+        roots.extend([Path("/usr/local/lib/solc-select"), Path("/opt/solc-select")])
     candidates: List[Path] = []
     for root in roots:
         art = root / "artifacts"
@@ -54,12 +51,9 @@ def installed_solc_versions() -> List[str]:
     env_root = os.getenv("SOLC_SELECT_INSTALL_DIR")
     if env_root:
         roots.append(Path(env_root))
-    home_root = Path.home() / ".solc-select"
-    if home_root not in roots:
-        roots.append(home_root)
-    for extra in (Path("/usr/local/lib/solc-select"), Path("/opt/solc-select")):
-        if extra not in roots:
-            roots.append(extra)
+    else:
+        roots.append(Path.home() / ".solc-select")
+        roots.extend([Path("/usr/local/lib/solc-select"), Path("/opt/solc-select")])
     for root in roots:
         artifacts = root / "artifacts"
         if not artifacts.is_dir():
