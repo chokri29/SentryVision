@@ -73,6 +73,7 @@ MAX_DAILY_AI_CALLS = max(1, int(os.getenv("MAX_DAILY_AI_CALLS", "100")))
 REDIS_URL = os.getenv("REDIS_URL")
 RATE_LIMIT_HMAC_KEY = os.getenv("RATE_LIMIT_HMAC_KEY") or os.getenv("LLM_API_KEY") or "local-development-only"
 TRUST_CF_CONNECTING_IP = os.getenv("TRUST_CF_CONNECTING_IP", "false").strip().lower() in {"1", "true", "yes", "on"}
+REQUIRE_SHARED_STORAGE = os.getenv("REQUIRE_SHARED_STORAGE", "false").strip().lower() in {"1", "true", "yes", "on"}
 ANALYSIS_TTL_SECONDS = int(os.getenv("ANALYSIS_TTL_SECONDS", "3600"))
 ANALYSIS_STORE_MAX = int(os.getenv("ANALYSIS_STORE_MAX", "200"))
 
@@ -321,6 +322,8 @@ def store_analysis(*, analysis_id: str, original_code: str, contract_name: str, 
     store = _redis()
     if store:
         store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+    elif REQUIRE_SHARED_STORAGE:
+        raise HTTPException(status_code=503, detail="Shared retry storage is not configured. Please try again later.")
     else:
         analysis_store[analysis_id] = row
 
@@ -346,6 +349,8 @@ def update_analysis(analysis_id: str, row: dict[str, Any]) -> None:
     store = _redis()
     if store:
         store.setex(f"sv:analysis:{analysis_id}", ANALYSIS_TTL_SECONDS, json.dumps(row))
+    elif REQUIRE_SHARED_STORAGE:
+        raise HTTPException(status_code=503, detail="Shared retry storage is not configured.")
     else:
         analysis_store[analysis_id] = row
 
@@ -630,7 +635,7 @@ async def health():
         "slither_available": available,
         "slither_enabled": ENABLE_SLITHER,
         "analysis_store_size": len(analysis_store) if not REDIS_URL else None,
-        "shared_storage_configured": bool(REDIS_URL),
+        "shared_storage_configured": bool(REDIS_URL),\n        "shared_storage_required": REQUIRE_SHARED_STORAGE,
         "distributed_usage_limits": bool(REDIS_URL),
         "client_ip_source": "cf-connecting-ip" if TRUST_CF_CONNECTING_IP else "socket-peer",
         "max_daily_ai_calls": MAX_DAILY_AI_CALLS,
