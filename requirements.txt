@@ -6,3 +6,5 @@ pydantic==2.14.2
 pytest==9.2.0
 httpx==0.28.1
 slither-analyzer==0.11.6
+redis==5.2.1
+semantic-version==2.10.0

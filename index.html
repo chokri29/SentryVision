@@ -157,7 +157,7 @@
         <button type="button" data-sample="access" onclick="loadSample('access')">Access Control</button>
         <button type="button" data-sample="unchecked" onclick="loadSample('unchecked')">Unchecked Call</button>
       </div>
-      <p class="input-hint">Paste a Solidity contract to get plain-language findings and visual exploit flows.</p>
+      <p class="input-hint">Paste a Solidity contract to get plain-language findings and visual exploit flows. Source is sent to Baseten for analysis and, only if you request a repair retry, to Meta. Avoid submitting secrets or private keys.</p>
       <textarea id="solidityInput" placeholder="Paste Solidity only."></textarea>
       <button type="button" id="analyzeBtn" class="primary-btn" onclick="analyzeContract()">Run Meta-assisted Audit</button>
       <div id="status" class="status"></div>
@@ -355,6 +355,17 @@
       const title = document.createElement('h3');
       title.textContent = (index + 1) + '. ' + (finding.title || 'Potential issue');
       top.appendChild(badge); top.appendChild(title); card.appendChild(top);
+      const evidence = document.createElement('p');
+      evidence.className = 'patch-details';
+      if (finding.grounding_status === 'grounded') {
+        const lineText = finding.slither_lines && finding.slither_lines.length ? finding.slither_lines.join(', ') : 'not mapped';
+        evidence.textContent = 'Slither: ' + (finding.slither_check || 'detector') + ' · Impact: ' + (finding.slither_impact || '—') + ' · Confidence: ' + (finding.slither_confidence || '—') + ' · Lines: ' + lineText;
+      } else if (finding.grounding_status === 'f1_unavailable') {
+        evidence.textContent = 'Ungrounded model suggestion — Slither did not run; this is not a Slither-confirmed finding.';
+      } else {
+        evidence.textContent = 'Ungrounded model suggestion — no matching Slither detector was supplied for this finding.';
+      }
+      card.appendChild(evidence);
       [['What happens', finding.what_happens], ['Why it matters', finding.why_it_matters], ['What to do', finding.what_to_do]].forEach(function (pair) {
         const row = document.createElement('div'); row.className = 'field';
         const strong = document.createElement('strong'); strong.textContent = pair[0];
@@ -507,7 +518,13 @@
       findingsEl.innerHTML = '';
       if (!findings.length) {
         const empty = document.createElement('div'); empty.className = 'empty';
-        empty.textContent = 'No vulnerabilities were detected in this contract.';
+        if (meta.f1_ran === false) {
+          empty.textContent = 'Slither did not run, and the model returned no findings. This is not a clean security result.';
+        } else if ((meta.slither_findings_count || 0) > 0) {
+          empty.textContent = 'Slither reported ' + meta.slither_findings_count + ' detector signal(s), but the model returned no finding cards. Review the analysis manually; the model may have omitted detector evidence.';
+        } else {
+          empty.textContent = 'No findings were returned by Slither or the model in this run. This does not prove the contract is vulnerability-free.';
+        }
         findingsEl.appendChild(empty);
       } else {
         for (let i = 0; i < findings.length; i++) {

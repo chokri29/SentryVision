@@ -17,6 +17,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from semantic_version import NpmSpec, Version
+
 logger = logging.getLogger("sentryvision.slither")
 
 SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
@@ -60,28 +62,32 @@ def _normalize_pragma(source_code: str, version: Optional[str] = None) -> str:
         return re.sub(r"pragma\s+solidity\s+[^;]+;", pinned, source_code, count=1)
     return pinned + "\n" + source_code
 
-def _extract_solc_version(source_code: str) -> str:
-    m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
-    if not m:
-        return DEFAULT_SOLC
-    spec = m.group(1).strip()
-    exact = re.fullmatch(r"(\d+\.\d+\.\d+)", spec)
-    if exact:
-        return exact.group(1)
-    if re.search(r"[\^>=~]", spec) and "0.8." in spec:
-        return DEFAULT_SOLC
-    nums = re.findall(r"\d+\.\d+\.\d+", spec)
-    if nums:
-        if any(n.startswith("0.8.") for n in nums):
-            return DEFAULT_SOLC
-        return nums[-1]
-    nums2 = re.findall(r"\d+\.\d+", spec)
-    if nums2:
-        major_minor = nums2[-1]
-        if major_minor.startswith("0.8"):
-            return DEFAULT_SOLC
-        return major_minor + ".0"
-    return DEFAULT_SOLC
+def _installed_solc_versions() -> List[str]:
+    root = Path(os.getenv("SOLC_SELECT_INSTALL_DIR", str(Path.home() / ".solc-select")))
+    artifacts = root / "artifacts"
+    versions = []
+    if artifacts.is_dir():
+        for item in artifacts.glob("solc-*"):
+            version = item.name.removeprefix("solc-")
+            if re.fullmatch(r"\d+\.\d+\.\d+", version) and _solc_artifact_path(version):
+                versions.append(version)
+    return sorted(set(versions), key=Version)
+
+
+def _extract_solc_version(source_code: str) -> Optional[str]:
+    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+    spec = match.group(1).strip() if match else DEFAULT_SOLC
+    try:
+        constraint = NpmSpec(spec)
+    except ValueError:
+        logger.warning("Unsupported Solidity pragma constraint: %s", spec)
+        return None
+    matches = [v for v in _installed_solc_versions() if constraint.match(Version(v))]
+    if matches:
+        return sorted(matches, key=Version)[-1]
+    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
+        return spec if _install_solc(spec) else None
+    return None
 
 _SOLC_LOCK = threading.Lock()
 OZ_ROOT = Path(__file__).resolve().parent / "vendor" / "openzeppelin" / "contracts"
@@ -164,16 +170,11 @@ def _install_solc(version: str) -> Optional[Path]:
             return path
         return None
 
-def _resolve_solc_binary(version: str):
-    candidates: List[str] = []
-    for ver in (version, DEFAULT_SOLC, "0.8.20", "0.8.19", "0.8.17"):
-        if ver and ver not in candidates:
-            candidates.append(ver)
-    for ver in candidates:
-        path = _install_solc(ver)
-        if path:
-            return ver, str(path)
-    return version or DEFAULT_SOLC, None
+def _resolve_solc_binary(version: Optional[str]):
+    if not version:
+        return None, None
+    path = _solc_artifact_path(version) or _install_solc(version)
+    return (version, str(path)) if path else (version, None)
 
 def _short_error(text: str, limit: int = 240) -> str:
     text = (text or "").strip()
@@ -199,8 +200,21 @@ def _classify_slither_error(error: Optional[str]) -> str:
 def _normalize_detectors(raw: dict) -> list:
     results = raw.get("results") or {}
     out = []
-    for d in results.get("detectors") or []:
-        out.append({"check": d.get("check") or d.get("name") or "unknown", "impact": d.get("impact") or "Informational", "confidence": d.get("confidence") or "Medium", "description": d.get("description") or ""})
+    for detector in results.get("detectors") or []:
+        lines, elements = set(), []
+        for element in detector.get("elements") or []:
+            mapping = element.get("source_mapping") or {}
+            lines.update(line for line in (mapping.get("lines") or []) if isinstance(line, int) and line > 0)
+            if element.get("name"):
+                elements.append(str(element["name"]))
+        out.append({
+            "check": detector.get("check") or detector.get("name") or "unknown",
+            "impact": detector.get("impact") or "Informational",
+            "confidence": detector.get("confidence") or "Medium",
+            "description": detector.get("description") or "",
+            "lines": sorted(lines),
+            "elements": sorted(set(elements)),
+        })
     return out
 
 def filter_findings(detectors: list) -> list:
@@ -226,7 +240,14 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol") -> Option
         extra = "" if len(missing) <= 5 else f" (+{len(missing) - 5} more)"
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Unsupported import: {shown}{extra}. Result is model-only.", "error_kind": "unsupported_import", "unresolved_imports": missing}
     rewritten = rewrite_known_oz_imports(source_code)
-    solc_ver, solc_bin = _resolve_solc_binary(_extract_solc_version(source_code))
+    selected_version = _extract_solc_version(source_code)
+    if not selected_version:
+        pragma_match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+        pragma_spec = pragma_match.group(1).strip() if pragma_match else DEFAULT_SOLC
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"No installed Solidity compiler satisfies pragma: {pragma_spec}", "error_kind": "compile_failed"}
+    solc_ver, solc_bin = _resolve_solc_binary(selected_version)
+    if not solc_bin:
+        return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Solidity compiler {selected_version} is not installed.", "error_kind": "compile_failed"}
     source = _normalize_pragma(rewritten, version=solc_ver)
     fname = _safe_filename(contract_name)
     with tempfile.TemporaryDirectory(prefix="sv_slither_") as tmp:
@@ -440,9 +461,6 @@ def surface_gap(original_code: str, patched_code: str) -> List[str]:
     patched = set(public_entry_points(patched_code))
     return sorted(set(original) - patched)
 
-def high_medium_check_names(detectors: list) -> List[str]:
-    return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
-
 def _public_entry_bodies(source_code: str) -> Dict[str, List[str]]:
     """Conservatively map public/external entry signatures to source bodies."""
     if not source_code or not source_code.strip():
@@ -511,8 +529,8 @@ def gutted_entry_points(original_code: Optional[str], patched_code: str) -> List
                 break
     return gutted
 
-
 def high_medium_check_names(detectors: list) -> List[str]:
+    """Return the unique High/Medium detector IDs from a Slither result."""
     return sorted({d["check"] for d in detectors if d.get("impact") in KEEP_IMPACTS and d.get("check")})
 
 
