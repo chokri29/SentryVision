@@ -1,5 +1,18 @@
 # Sentry Vision
 
+<img src="image.jpg" alt="Sentry Vision preview" width="100%">
+
+<p align="center">
+  <a href="https://sentry-vision-dyql.onrender.com/">
+    <img src="https://img.shields.io/badge/try%20it%20live-open-9FE870?style=for-the-badge&logo=render&logoColor=black" alt="Try it live">
+  </a>
+  <img src="https://img.shields.io/badge/demo%20video-coming%20soon-64748b?style=for-the-badge&logo=youtube&logoColor=white" alt="Demo video coming soon">
+  <a href="https://github.com/chokri29/SentryVision/actions/workflows/tests.yml">
+    <img src="https://img.shields.io/badge/CI-passing-28a745?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI workflow">
+  </a>
+</p>
+
+
 **SentryVision is a standalone smart contract security verifier built for the Meta Hackathon. It analyzes Solidity contracts, identifies vulnerabilities, explains how an exploit would actually happen, and visualizes the attack flow.**
 
 Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta's Muse Spark Open (and optional Muse Wonder on repair – complex reasoning) to produce structured, auditable, and visual security intelligence.
