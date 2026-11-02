@@ -100,7 +100,7 @@ For a multi-worker Render deployment, configure a shared Redis service (use a TL
 - `REDIS_URL`: shared Redis connection URL. Retry state is stored with `ANALYSIS_TTL_SECONDS` expiry and shared across workers/restarts.
 - `REQUIRE_SHARED_STORAGE=true`: refuse analysis persistence if Redis is absent; do not silently fall back to process memory.
 - `REQUIRE_REDIS_RATE_LIMIT=true`: fail closed if shared usage protection is unavailable.
-- `MAX_DAILY_AI_CALLS=100`: global daily cap across analysis and retry calls, enforced atomically in Redis.
+- `MAX_DAILY_AI_CALLS=300`: global daily cap across analysis and retry calls, enforced atomically in Redis.
 - `MAX_PATCH_RETRIES=3`: server-enforced retry limit, now read from the environment.
 - `TRUST_CF_CONNECTING_IP=true`: use only the single-value `CF-Connecting-IP` header supplied by Render's Cloudflare edge. The app never trusts client-supplied `X-Forwarded-For`; if the edge header is missing or invalid, it falls back to the socket peer.
 - `RATE_LIMIT_HMAC_KEY`: optional dedicated secret used to pseudonymize IP addresses in Redis rate-limit keys.
