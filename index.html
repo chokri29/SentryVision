@@ -64,7 +64,7 @@ textarea{width:100%;min-height:200px;resize:vertical;background:#0c0a16;color:#d
 .fb{font-size:.75rem;color:#fbbf24;margin:0 0 8px}
 pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;font-size:.75rem;color:#c7f9e0;max-height:320px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
-.actions button{border:1.5px solid rgba(139,92,246,.45);background:linear-gradient(180deg,rgba(40,30,70,.95),rgba(22,18,40,.95));color:#f0e9ff;border-radius:12px;padding:10px 16px;font-size:.84rem;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.28);letter-spacing:.01em;transition:transform .15s,border-color .15s,box-shadow .15s}
+.actions button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;min-width:7.5rem;border:1.5px solid rgba(139,92,246,.45);background:linear-gradient(180deg,rgba(40,30,70,.95),rgba(22,18,40,.95));color:#f0e9ff;border-radius:12px;padding:10px 16px;font-size:.88rem;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.28);letter-spacing:.01em;transition:transform .15s,border-color .15s,box-shadow .15s}
 .actions button:hover{transform:translateY(-1px);border-color:rgba(139,92,246,.75);box-shadow:0 6px 18px rgba(124,58,237,.25)}
 .actions button:active{transform:translateY(0)}
 .actions button#copyPatchBtn{border-color:rgba(0,129,251,.55);background:linear-gradient(180deg,rgba(0,129,251,.22),rgba(22,18,40,.95));color:#cfe5ff}
@@ -84,8 +84,7 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
     <span class="pill wonder" id="pillWonder"><span class="dot"></span><span class="value" id="pillWonderValue">…</span></span>
   </div>
 </header>
-<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 <span class="meta-brand">Muse Spark</span></strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the fixes. <span class="meta-brand"> – Muse Wonder </span> retries out a rejected patch, up to 3 times if needed. </em> </div>
-  
+<div class="pipeline">How it works: <strong>F1 Slither</strong> detects → <strong>F2 <span class="meta-brand">Muse Spark</span></strong> explains & proposes a fix → <strong>F3 Slither</strong> re-checks the patch. Retry with <span class="meta-brand">Muse Wonder</span> up to 3 times if needed. Green <em>Passed</em> is not a full audit.</div>
 <div class="hero">
   <div class="orb-wrap"><div class="orb-ring"></div>
     <button type="button" class="orb" id="analyzeBtn"><span id="orbIcon">✦</span><span id="orbLabel">Run Audit</span></button>
@@ -113,8 +112,13 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
   <div class="panel" id="patchPanel" style="display:none">
     <h2 style="margin:0 0 10px;font-size:1.05rem">Consolidated patch</h2>
     <p class="meta" id="patchSummary"></p><div id="patchBadges" class="top"></div>
-    <div class="actions"><button type="button" id="copyPatchBtn">Copy patch</button><button type="button" id="downloadPatchBtn">Download .sol</button><button type="button" id="toggleDiffBtn">Show unified diff</button></div>
-    <pre id="patchCode" style="display:none"></pre><pre id="patchDiff" style="display:none"></pre>
+    <div class="actions">
+      <button type="button" id="copyPatchBtn">Copy patch</button>
+      <button type="button" id="downloadPatchBtn">Download .sol</button>
+      <button type="button" id="toggleDiffBtn">Show unified diff</button>
+    </div>
+    <pre id="patchCode" style="display:none"></pre>
+    <pre id="patchDiff" style="display:none"></pre>
   </div>
   <div class="panel"><h2 style="margin:0 0 10px;font-size:1.05rem">Findings</h2><div id="findings"></div></div>
 </div>
@@ -144,7 +148,7 @@ async function refreshHealth(){
     wonderConfigured=d.wonder_configured===true;
     setPill(document.getElementById("pillWonder"),document.getElementById("pillWonderValue"), wonderConfigured?"on":"off", wonderConfigured?"Muse Wonder":"Not configured");
   }catch(e){
-    ["pillSlither","pillModel","pillWonder"].forEach((id,i)=>{const el=document.getElementById(id); const v=document.getElementById(id+"Value"); setPill(el,v,"off","Unavailable");});
+    ["pillSlither","pillModel","pillWonder"].forEach((id)=>{const el=document.getElementById(id); const v=document.getElementById(id+"Value"); setPill(el,v,"off","Unavailable");});
   }
 }
 function showStatus(k,m){const el=document.getElementById("statusLine");el.className="status "+k;el.textContent=m;}
@@ -152,12 +156,12 @@ function clearStatus(){const el=document.getElementById("statusLine");el.classNa
 function setStage(step,msg){const pct=step<=0?0:step>=4?100:(step/3)*100;stageFill.style.width=pct+"%";stageEls.forEach((el,i)=>{el.classList.remove("active","done");if(step>=4||step>i+1)el.classList.add("done");else if(step===i+1)el.classList.add("active");});if(msg)stageMsg.textContent=msg;}
 function setOrb(on){analyzeBtn.classList.toggle("analyzing",on);analyzeBtn.disabled=on;orbIcon.textContent=on?"⟳":"✦";orbLabel.textContent=on?"Analyzing":"Run Audit";}
 function stopProg(){if(progressTimer){clearInterval(progressTimer);progressTimer=null;}}
-function startProg(){stopProg();setOrb(true);const st=[[1,"F1 · Running Slither…"],[2,"F2 · Muse Spark triaging…"],[3,"F3 · Verifying patch…"]];let i=0;setStage(st[0][0],st[0][1]);showStatus("loading",st[0][1]);progressTimer=setInterval(()=>{i=Math.min(i+1,st.length-1);setStage(st[i][0],st[i][1]);showStatus("loading",st[i][1]);if(i>=st.length-1)stopProg();},8000);}
+function startProg(){stopProg();setOrb(true);const st=[[1,"F1 · Running Sli ther…"],[2,"F2 · Muse Spark triaging…"],[3,"F3 · Verifying patch…"]];let i=0;setStage(st[0][0],st[0][1]);showStatus("loading",st[0][1]);progressTimer=setInterval(()=>{i=Math.min(i+1,st.length-1);setStage(st[i][0],st[i][1]);showStatus("loading",st[i][1]);if(i>=st.length-1)stopProg();},8000);}
 function hideRetry(){document.getElementById("retryBar").style.display="none";lastRetryAvailable=false;}
 function showRetry(meta,patch){const avail=!!(meta&&meta.retry_available)||!!(patch&&patch.retry_available);if(!avail){hideRetry();return;}lastRetryAvailable=true;lastAnalysisId=(meta&&meta.analysis_id)||lastAnalysisId;const n=(patch&&patch.retry_count!=null)?patch.retry_count:((meta&&meta.retry_count)||0);lastMaxRetries=(meta&&meta.max_patch_retries!=null)?meta.max_patch_retries:((patch&&patch.max_patch_retries!=null)?patch.max_patch_retries:lastMaxRetries);document.getElementById("retryText").textContent="Patch failed Slither re-check. Retry with "+(wonderConfigured?"Muse Wonder":"repair model")+" ("+n+"/"+lastMaxRetries+" used). Verified ≠ fully safe.";const b=document.getElementById("retryBtn");b.disabled=false;b.textContent="Retry patch";document.getElementById("retryBar").style.display="block";}
 function loadSample(k){inputEl.value=(SAMPLES[k]||"").replace(/\\n/g,"\n");document.querySelectorAll(".sample").forEach(b=>b.classList.toggle("active",b.dataset.k===k));clearStatus();document.getElementById("results").style.display="none";hideRetry();setStage(0,"Sample loaded — press the orb to audit");}
 document.querySelectorAll(".sample").forEach(b=>b.addEventListener("click",()=>loadSample(b.dataset.k)));
-function patchLabel(status,verified,fk){if(status==="verified"||verified)return"Passed Slither re-scan + surface check";if(fk==="surface_removed")return"Patch removed/changed public signatures";if(fk==="gutted_function")return"Patch gutted a public function";if(fk==="compile_failed")return"Patch failed to compile";if(fk==="still_vulnerable")return"Still vulnerable";if(fk==="regression_introduced")return"Regression introduced";if(fk==="verification_skipped")return"Model only — not verified";if(fk==="model_no_patch")return"No patch produced";if(status==="failed")return"Patch failed Slither re-check";return"Not verified";}
+function patchLabel(status,verified,fk){if(status==="verified"||verified)return"Passed Slither re-scan + surface check";if(fk==="surface_removed")return"Patch removed/changed public signatures";if(fk==="gutted_function")return"Patch gutted a public function";if(fk==="compile_failed")return"Patch failed to compile";if(fk==="still_vulnerable")return"Still vulnerable";if(fk==="regression_introduced")return"Regression introduced";if(fk==="verification_skipped")return"Model only — not verified";if(fk==="model_no_patch")return"No patch produced";if(status==="failed")return"Patch failed Sli ther re-check";return"Not verified";}
 function patchClass(status,verified){if(status==="verified"||verified)return"ok";if(status==="failed")return"fail";return"neutral";}
 function sanitizeMermaid(s){if(!s)return"";return String(s).replace(/^```mermaid\s*/i,"").replace(/```$/i,"").trim();}
 function fallbackDiagram(f){const t=String((f&&f.title)||"Issue").replace(/[^a-zA-Z0-9 _-]/g," ").slice(0,36);return"flowchart TD\n  A[Issue] --> B["+t+"]\n  B --> C[Review finding text]";}
@@ -197,13 +201,28 @@ function renderPatch(patch){
   codeEl.style.display=lastPatchCode?"block":"none";diffEl.style.display="none";
   document.getElementById("toggleDiffBtn").textContent="Show unified diff";
 }
+function normalizePatch(raw, meta){
+  if(!raw)return null;
+  return {
+    code: raw.code || raw.patched_code || "",
+    summary: raw.change_summary || raw.summary || raw.patch_change_summary || "",
+    status: raw.verification_status || raw.status || "not_checked",
+    verified: !!(raw.patch_verified || raw.verified),
+    verification_error_kind: raw.failure_kind || raw.verification_error_kind || null,
+    unified_diff: raw.diff || raw.unified_diff || "",
+    retry_count: (raw.retry_count!=null?raw.retry_count:(meta&&meta.retry_count))||0,
+    retry_available: !!(raw.retry_available || (meta&&meta.retry_available)),
+    max_patch_retries: (meta&&meta.max_patch_retries!=null)?meta.max_patch_retries:lastMaxRetries
+  };
+}
 function renderAuditData(data){
   document.getElementById("results").style.display="block";
   document.getElementById("summaryText").textContent=(data.summary||"").trim()||"No summary returned.";
-  const meta=data.meta||{};const patch=data.patch||null;
+  const meta=data.meta||{};
+  const patch=normalizePatch(data.consolidated_patch||data.patch||null, meta);
   lastAnalysisId=meta.analysis_id||lastAnalysisId;
   if(meta.max_patch_retries!=null)lastMaxRetries=meta.max_patch_retries;
-  const signals=meta.slither_signal_count!=null?meta.slither_signal_count:(Array.isArray(data.slither_signals)?data.slither_signals.length:0);
+  const signals=meta.slither_signal_count!=null?meta.slither_signal_count:(Array.isArray(data.slither_signals)?data.slither_signals.length:(meta.slither_findings_count!=null?meta.slither_findings_count:0));
   let pipeline=meta.pipeline_label||"";
   if(!pipeline){
     if(meta.static_analysis_unavailable||meta.verification_error_kind==="verification_skipped")pipeline="Pipeline: F2 only (static analysis unavailable)";
@@ -240,7 +259,7 @@ async function retryOnce(){
   const btn=document.getElementById("retryBtn");btn.disabled=true;btn.textContent="Retrying…";
   setOrb(true);setStage(2,"Retry · Muse Wonder repairing…");showStatus("loading","Retrying patch…");
   try{
-    const r=await fetch("/retry-patch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({analysis_id:lastAnalysisId})});
+    const r=await fetch("/analyze/"+encodeURIComponent(lastAnalysisId)+"/retry-patch",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
     const data=await r.json().catch(()=>({}));
     setOrb(false);
     if(!r.ok){showStatus("error",(data&&data.detail)||("HTTP "+r.status));btn.disabled=false;btn.textContent="Retry patch";return;}
