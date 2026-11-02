@@ -2,7 +2,7 @@
 
 **SentryVision is a standalone smart contract security verifier built for the Meta Hackathon. It analyzes Solidity contracts, identifies vulnerabilities, explains how an exploit would actually happen, and visualizes the attack flow.**
 
-Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta's Muse Spark Open (and optional Muse Wonder on repair) to produce structured, auditable, and visual security intelligence.
+Unlike generic scanners that output cryptic reports, SentryVision combines deterministic static analysis with Meta's Muse Spark Open (and optional Muse Wonder on repair – complex reasoning) to produce structured, auditable, and visual security intelligence.
 
 > Sentry Vision is a triage and visualization tool, **not** a formal security audit. See [Limitations](#limitations).
 
@@ -12,7 +12,7 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 - **Slither** is a reliable deterministic detector, but its output is hard to read.
 - **LLMs** are easy to read, but they can hallucinate.
-- **Sentry Vision combines them:** Slither detects, Muse Spark Open interprets and visualizes, Slither re-checks the proposed fix, and optional Muse Wonder retries a rejected patch once.
+- **Sentry Vision combines them:** Slither detects, Muse Spark Open interprets and visualizes, Slither re-checks the proposed fix, and optional Muse Wonder retries a rejected patch up to three times.
 
 ---
 
@@ -32,7 +32,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 3. **Muse Spark Open** triages the findings in plain language and proposes a patch.
 4. The app returns **structured JSON** and renders a **visual attack flowchart** (Mermaid).
 5. **Slither re-runs on the patch** and a **public signature surface check** runs.
-6. If F3 rejects the patch, the user can **retry once** (Muse Wonder when configured).
+6. If F3 rejects the patch, the user can **retry up to 3 times** with Muse Wonder (complex reasoning)
 
 **Core differentiation:** not just "find bugs", but *show how the hack would happen*, and check the fix with the same deterministic tool — without claiming a formal audit.
 
@@ -58,7 +58,7 @@ flowchart TD
     D --> H["Patch proposal"]
     H --> I["F3: Sli ther re-verification"]
     I --> G
-    I -->|"F3 rejected (user clicks Retry once)"| J["Optional: Muse Wonder repair"]
+    I -->|"F3 rejected (user clicks Retry up to 3 times)"| J["Optional: Muse Wonder repair"]
     J --> I
 ```
 
@@ -88,7 +88,7 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | **Server state** | Redis-backed `meta.analysis_id` — original source + findings with a 1h TTL; local in-memory fallback is for development only |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
 | **Cap** | `MAX_PATCH_RETRIES=1` server-side |
-| **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; retry is enabled only when `LLM_RETRY_API_KEY` is configured |
+| **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; `LLM_RETRY_API_KEY`  |
 | **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; separate Meta client, never the Baseten key. Without the Meta key, the retry action stays unavailable |
 
 Retry does **not** run on identical patches, empty patches, or pure infra failures. The pass label means only the claim above — not "safe to deploy."
@@ -101,7 +101,7 @@ For a multi-worker Render deployment, configure a shared Redis service (use a TL
 - `REQUIRE_SHARED_STORAGE=true`: refuse analysis persistence if Redis is absent; do not silently fall back to process memory.
 - `REQUIRE_REDIS_RATE_LIMIT=true`: fail closed if shared usage protection is unavailable.
 - `MAX_DAILY_AI_CALLS=100`: global daily cap across analysis and retry calls, enforced atomically in Redis.
-- `MAX_PATCH_RETRIES=1`: server-enforced retry limit, now read from the environment.
+- `MAX_PATCH_RETRIES=3`: server-enforced retry limit, now read from the environment.
 - `TRUST_CF_CONNECTING_IP=true`: use only the single-value `CF-Connecting-IP` header supplied by Render's Cloudflare edge. The app never trusts client-supplied `X-Forwarded-For`; if the edge header is missing or invalid, it falls back to the socket peer.
 - `RATE_LIMIT_HMAC_KEY`: optional dedicated secret used to pseudonymize IP addresses in Redis rate-limit keys.
 
@@ -135,7 +135,7 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 - UI: http://localhost:8000
 - Health: `GET /health`
 - Analyze: `POST /analyze`
-- Retry: `POST /analyze/{analysis_id}/retry-patch` (max 1)
+- Retry: `POST /analyze/{analysis_id}/retry-patch` (max 3)
 
 ## Demo for judges
 
