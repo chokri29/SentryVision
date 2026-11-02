@@ -98,7 +98,7 @@ def test_unmatched_model_finding_is_explicitly_ungrounded():
     assert finding.grounding_status == "ungrounded"
 
 
-def test_retry_endpoint_allows_one_eligible_retry_then_exhausts(monkeypatch):
+def test_retry_endpoint_stops_after_success_and_exhausts_at_cap(monkeypatch):
     from fastapi import HTTPException
 
     row = {
@@ -149,7 +149,12 @@ def test_retry_endpoint_allows_one_eligible_retry_then_exhausts(monkeypatch):
 
     second = client.post("/analyze/test-id/retry-patch")
     assert second.status_code == 400
-    assert "exhausted" in second.json()["detail"].lower()
+    assert "not eligible" in second.json()["detail"].lower()
+
+    row["retry_count"] = main.MAX_PATCH_RETRIES
+    exhausted = client.post("/analyze/test-id/retry-patch")
+    assert exhausted.status_code == 400
+    assert "exhausted" in exhausted.json()["detail"].lower()
 
 
 def test_redis_daily_ai_budget_is_global_and_enforced(monkeypatch):

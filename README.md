@@ -6,6 +6,8 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 > Sentry Vision is a triage and visualization tool, **not** a formal security audit. See [Limitations](#limitations).
 
+**Live demo:** [https://sentry-vision-dyql.onrender.com](https://sentry-vision-dyql.onrender.com)
+
 ---
 
 ## Why not just Slither, or just an LLM?
@@ -45,7 +47,7 @@ Neither tells them *what is actually dangerous* or *how an attack would really h
 | **F1** | Deterministic static signal | Slither |
 | **F2** | Triage, explanation, patch, Mermaid | Muse Spark Open via Baseten |
 | **F3** | Patch re-scan + surface check | Slither + signature surface |
-| **Retry** (optional) | One user-triggered repair if F3 rejects | Muse Wonder through Meta Model API, using separate `LLM_RETRY_API_KEY` credentials |
+| **Retry** (optional) | Up to 3 user-triggered repairs if F3 rejects | Muse Wonder through Meta Model API, using separate `LLM_RETRY_API_KEY` credentials |
 
 ```mermaid
 flowchart TD
@@ -56,7 +58,7 @@ flowchart TD
     D --> E["Structured JSON findings + Mermaid flows"]
     E --> G["Finding cards"]
     D --> H["Patch proposal"]
-    H --> I["F3: Sli ther re-verification"]
+    H --> I["F3: Slither re-verification"]
     I --> G
     I -->|"F3 rejected (user clicks Retry up to 3 times)"| J["Optional: Muse Wonder repair"]
     J --> I
@@ -80,11 +82,11 @@ F1 can resolve only the documented `SUPPORTED_OZ_IMPORTS` list through `vendor/o
 
 ### Bounded self-heal (optional retry)
 
-When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface_removed`, `gutted_function`, or `regression_introduced`), the UI can offer **one** user-triggered retry:
+When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface_removed`, `gutted_function`, or `regression_introduced`), the UI can offer up to **3** user-triggered retries:
 
 | Piece | Behavior |
 | --- | --- |
-| **Trigger** | User clicks **Retry patch once** (never auto) |
+| **Trigger** | User clicks **Retry patch** (never auto; up to 3) |
 | **Server state** | Redis-backed `meta.analysis_id` — original source + findings with a 1h TTL; local in-memory fallback is for development only |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
 | **Cap** | `MAX_PATCH_RETRIES=3` server-side |
@@ -112,7 +114,7 @@ The six-requests-per-minute per-client limit and daily AI-call cap are distribut
 ## Meta models used
 
 - **Muse Spark Open** — default F2 triage / patch proposal.
-- **Muse Wonder** (optional) — stronger triple-shot repair on user-triggered retry.
+- **Muse Wonder** (optional) — stronger repair on a user-triggered retry, up to 3 times.
 
 ## Tech stack
 
@@ -139,9 +141,10 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 
 ## Demo for judges
 
-1. Open the live app.
-2. Click **Reentrancy** → **Run Meta-assisted Audit**.
+1. Open [https://sentry-vision-dyql.onrender.com](https://sentry-vision-dyql.onrender.com).
+2. Click **Reentrancy** → **Run Analysis**.
 3. Look for pipeline label, findings, Mermaid, and the green **Passed Slither re-scan + surface check** badge (or an honest failure / model-only label).
+4. If the patch is rejected, click **Retry patch**. Muse Wonder may run up to 3 times.
 
 ## Limitations
 
@@ -149,13 +152,14 @@ docker run --rm -p 8000:8000 --env-file .env sentryvision
 - F3 claim is compile + Slither re-scan clean (no High/Medium) + name + parameter types surface preserved + behaviour-lite passed. It does not establish behavioural preservation or security.
 - A green pytest suite is test evidence, not proof of complete verification.
 - OZ support is a **vendored OZ subset** with documented supported import paths; it is not audited upstream code and is not claimed equivalent to real OpenZeppelin.
-- Production retry state and global usage budgets require a configured shared Redis instance; process-local fallback is development-only.\n- Solidity source is transmitted to Baseten for analysis and to Meta only when a user requests the optional Muse Wonder retry.
+- Production retry state and global usage budgets require a configured shared Redis instance; process-local fallback is development-only.
+- Solidity source is transmitted to Baseten for analysis and to Meta only when a user requests the optional Muse Wonder retry.
 
 ## Credits
 
 - [Slither](https://github.com/crytic/slither) by Trail of Bits
 - [Mermaid.js](https://mermaid.js.org)
-- [Meta](https://ai.meta.com) — Muse Spark Open + Meta Wonder 
+- [Meta](https://ai.meta.com) — Muse Spark Open + Muse Wonder 
 - [Baseten](https://baseten.co) — inference credits and hosting
 
 ## License
