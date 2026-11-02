@@ -68,7 +68,8 @@ REQUEST_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 USE_JSON_MODE = os.getenv("LLM_JSON_MODE", "false").strip().lower() == "true"
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
 MAX_PATCH_VERIFICATIONS = int(os.getenv("MAX_PATCH_VERIFICATIONS", "3"))
-MAX_PATCH_RETRIES = max(0, int(os.getenv("MAX_PATCH_RETRIES", "1")))
+MAX_PATCH_RETRIES = max(0, int(os.getenv("MAX_PATCH_RETRIES", "3")))
+RETRY_TRANSPORT_ATTEMPTS = max(1, int(os.getenv("LLM_RETRY_TRANSPORT_ATTEMPTS", "3")))
 MAX_DAILY_AI_CALLS = max(1, int(os.getenv("MAX_DAILY_AI_CALLS", "100")))
 REDIS_URL = os.getenv("REDIS_URL")
 RATE_LIMIT_HMAC_KEY = os.getenv("RATE_LIMIT_HMAC_KEY") or os.getenv("LLM_API_KEY") or "local-development-only"
@@ -789,35 +790,60 @@ def retry_patch(analysis_id: str, request: Request):
         details=previous.get("verification_details"),
         findings_rows=list(enumerate(findings_data)),
     )
+    completion = None
+    for attempt in range(1, RETRY_TRANSPORT_ATTEMPTS + 1):
+        try:
+            completion = model_client.chat.completions.create(
+                model=RETRY_MODEL_NAME,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=MAX_OUTPUT_TOKENS,
+                timeout=RETRY_TIMEOUT_SECONDS,
+            )
+            break
+        except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+            # Bad response body after a successful HTTP round-trip — do not burn transport retries.
+            logger.warning("Muse Wonder returned invalid retry JSON")
+            raise HTTPException(status_code=502, detail="Retry model returned an invalid response. Please try again.") from exc
+        except Exception as exc:
+            logger.warning("Muse Wonder transport attempt %s/%s failed: %s", attempt, RETRY_TRANSPORT_ATTEMPTS, exc)
+            if attempt < RETRY_TRANSPORT_ATTEMPTS:
+                time.sleep(min(1.5 * attempt, 4.0))
+                continue
+            logger.exception("Muse Wonder retry failed after %s transport attempts", RETRY_TRANSPORT_ATTEMPTS)
+            raise HTTPException(status_code=502, detail="Retry service temporarily unavailable. Please try again.") from exc
     try:
-        completion = model_client.chat.completions.create(model=RETRY_MODEL_NAME, messages=messages, temperature=0.1, max_tokens=MAX_OUTPUT_TOKENS, timeout=RETRY_TIMEOUT_SECONDS)
         retry_result = parse_retry_output(completion.choices[0].message.content or "")
     except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
         logger.warning("Muse Wonder returned invalid retry JSON")
         raise HTTPException(status_code=502, detail="Retry model returned an invalid response. Please try again.") from exc
-    except Exception as exc:
-        logger.exception("Muse Wonder retry failed")
-        raise HTTPException(status_code=502, detail="Retry service temporarily unavailable. Please try again.") from exc
     if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
         consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
     else:
         consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_detector_checks"), ENABLE_SLITHER, retry_result.change_summary, retry_count + 1, original_high_medium_checks=row.get("original_high_medium_checks") or [])
         consolidated.retry_count = retry_count + 1
-    consolidated.retry_available = False
+    new_count = retry_count + 1
+    still_failed = not consolidated.patch_verified and (consolidated.failure_kind or "") in {
+        "still_vulnerable", "compile_failed", "regression_introduced",
+        "surface_removed", "gutted_function", "model_no_patch",
+    }
+    more_retries = bool(RETRY_API_KEY) and still_failed and new_count < MAX_PATCH_RETRIES
+    consolidated.retry_count = new_count
+    consolidated.retry_available = more_retries
     row["consolidated_patch"] = consolidated.model_dump()
-    row["retry_count"] = retry_count + 1
+    row["retry_count"] = new_count
     update_analysis(analysis_id, row)
     f1_ran = row.get("slither_error") is None
     return AuditResponse(summary=row.get("summary") or "", findings=[Finding.model_validate(f) for f in findings_data], consolidated_patch=consolidated, meta={
         "analysis_id": analysis_id, "model": RETRY_MODEL_NAME, "retry_model": RETRY_MODEL_NAME,
         "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
         "slither_error": row.get("slither_error"), "f1_ran": f1_ran,
-        "pipeline_label": "Muse Wonder → one consolidated F3 verification" if f1_ran else MODEL_ONLY_PIPELINE,
+        "pipeline_label": "Muse Wonder → F3 verification" if f1_ran else MODEL_ONLY_PIPELINE,
         "patches_verified_count": int(consolidated.patch_verified),
         "patches_proposed_count": int(bool(consolidated.code)),
         "patches_failed_count": int(consolidated.verification_status == "failed"),
-        "retry_count": retry_count + 1, "max_patch_retries": MAX_PATCH_RETRIES,
-        "retry_available": False, "is_retry": True,
+        "retry_count": new_count, "max_patch_retries": MAX_PATCH_RETRIES,
+        "retry_available": more_retries, "is_retry": True,
     })
 
 
