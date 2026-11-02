@@ -818,7 +818,7 @@ def retry_patch(analysis_id: str, request: Request):
         logger.warning("Muse Wonder returned invalid retry JSON")
         raise HTTPException(status_code=502, detail="Retry model returned an invalid response. Please try again.") from exc
     if retry_result.unable_to_fix or not (retry_result.consolidated_patch or "").strip():
-        consolidated = ConsolidatedPatch(code=previous.get("code"), diff=previous.get("diff") or "", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
+        consolidated = ConsolidatedPatch(code=None, diff="", change_summary=retry_result.change_summary, verification_status="not_checked", failure_kind="model_no_patch", verification_details=retry_result.unable_reason or "Muse Wonder could not produce a reliable patch.", retry_count=retry_count + 1)
     else:
         consolidated = verify_consolidated_patch(retry_result.consolidated_patch, original_code, row.get("original_detector_checks"), ENABLE_SLITHER, retry_result.change_summary, retry_count + 1, original_high_medium_checks=row.get("original_high_medium_checks") or [])
         consolidated.retry_count = retry_count + 1
