@@ -111,6 +111,7 @@ pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding
   <div class="panel"><h2 style="margin:0 0 10px;font-size:1.05rem">Analysis summary</h2><p class="meta" id="summaryText"></p><p class="meta" id="metaLine"></p></div>
   <div class="panel" id="patchPanel" style="display:none">
     <h2 style="margin:0 0 10px;font-size:1.05rem">Consolidated patch</h2>
+    <p class="meta" id="patchAttempt" aria-live="polite"></p>
     <p class="meta" id="patchSummary"></p><div id="patchBadges" class="top"></div>
     <div class="actions">
       <button type="button" id="copyPatchBtn">Copy patch</button>
@@ -158,7 +159,7 @@ function setOrb(on){analyzeBtn.classList.toggle("analyzing",on);analyzeBtn.disab
 function stopProg(){if(progressTimer){clearInterval(progressTimer);progressTimer=null;}}
 function startProg(){stopProg();setOrb(true);const st=[[1,"F1 · Running Slither…"],[2,"F2 · Muse Spark triaging…"],[3,"F3 · Verifying patch…"]];let i=0;setStage(st[0][0],st[0][1]);showStatus("loading",st[0][1]);progressTimer=setInterval(()=>{i=Math.min(i+1,st.length-1);setStage(st[i][0],st[i][1]);showStatus("loading",st[i][1]);if(i>=st.length-1)stopProg();},8000);}
 function hideRetry(){document.getElementById("retryBar").style.display="none";lastRetryAvailable=false;}
-function showRetry(meta,patch){const avail=!!(meta&&meta.retry_available)||!!(patch&&patch.retry_available);if(!avail){hideRetry();return;}lastRetryAvailable=true;lastAnalysisId=(meta&&meta.analysis_id)||lastAnalysisId;const n=(patch&&patch.retry_count!=null)?patch.retry_count:((meta&&meta.retry_count)||0);lastMaxRetries=(meta&&meta.max_patch_retries!=null)?meta.max_patch_retries:((patch&&patch.max_patch_retries!=null)?patch.max_patch_retries:lastMaxRetries);document.getElementById("retryText").textContent="Patch failed Slither re-check. Retry with "+(wonderConfigured?"Muse Wonder":"repair model")+" ("+n+"/"+lastMaxRetries+" used). Verified ≠ fully safe.";const b=document.getElementById("retryBtn");b.disabled=false;b.textContent="Retry patch";document.getElementById("retryBar").style.display="block";}
+function showRetry(meta,patch){const avail=!!(meta&&meta.retry_available)||!!(patch&&patch.retry_available);if(!avail){hideRetry();return;}lastRetryAvailable=true;lastAnalysisId=(meta&&meta.analysis_id)||lastAnalysisId;const n=(patch&&patch.retry_count!=null)?patch.retry_count:((meta&&meta.retry_count)||0);lastMaxRetries=(meta&&meta.max_patch_retries!=null)?meta.max_patch_retries:((patch&&patch.max_patch_retries!=null)?patch.max_patch_retries:lastMaxRetries);document.getElementById("retryText").textContent="Attempt "+(n+1)+" was rejected. Retry with "+(wonderConfigured?"Muse Wonder":"repair model")+" ("+n+"/"+lastMaxRetries+" retries used). The patch panel shows the latest returned proposal. Verified ≠ fully safe.";const b=document.getElementById("retryBtn");b.disabled=false;b.textContent="Retry patch";document.getElementById("retryBar").style.display="block";}
 function loadSample(k){inputEl.value=(SAMPLES[k]||"").replace(/\\n/g,"\n");document.querySelectorAll(".sample").forEach(b=>b.classList.toggle("active",b.dataset.k===k));clearStatus();document.getElementById("results").style.display="none";hideRetry();setStage(0,"Sample loaded — press the orb to analyze");}
 document.querySelectorAll(".sample").forEach(b=>b.addEventListener("click",()=>loadSample(b.dataset.k)));
 function patchLabel(status,verified,fk){if(status==="verified"||verified)return"Passed Slither re-scan + surface check";if(fk==="surface_removed")return"Patch removed/changed public signatures";if(fk==="gutted_function")return"Patch gutted a public function";if(fk==="compile_failed")return"Patch failed to compile";if(fk==="still_vulnerable")return"Still vulnerable";if(fk==="regression_introduced")return"Regression introduced";if(fk==="verification_skipped")return"Model only — not verified";if(fk==="model_no_patch")return"No patch produced";if(status==="failed")return"Patch failed Slither re-check";return"Not verified";}
@@ -192,7 +193,8 @@ function renderPatch(patch){
   const panel=document.getElementById("patchPanel");
   if(!patch){panel.style.display="none";return;}
   panel.style.display="block";
-  document.getElementById("patchSummary").textContent=patch.summary||"";
+  document.getElementById("patchAttempt").textContent="Current proposal · Attempt "+((patch.retry_count||0)+1)+" (initial analysis is Attempt 1; retries are numbered separately below).";
+   document.getElementById("patchSummary").textContent=patch.summary||"";
   const badges=document.getElementById("patchBadges");badges.innerHTML="";
   const st=document.createElement("span");st.className="badge "+patchClass(patch.status,patch.verified);st.textContent=patchLabel(patch.status,patch.verified,patch.verification_error_kind);badges.appendChild(st);
   lastPatchCode=patch.code||"";lastPatchDiff=patch.unified_diff||"";
@@ -220,7 +222,7 @@ function renderAuditData(data){
   document.getElementById("summaryText").textContent=(data.summary||"").trim()||"No summary returned.";
   const meta=data.meta||{};
   const patch=normalizePatch(data.consolidated_patch||data.patch||null, meta);
-  lastAnalysisId=meta.analysis_id||lastAnalysisId;
+  if(meta.analysis_id)lastAnalysisId=meta.analysis_id;
   if(meta.max_patch_retries!=null)lastMaxRetries=meta.max_patch_retries;
   const signals=meta.slither_signal_count!=null?meta.slither_signal_count:(Array.isArray(data.slither_signals)?data.slither_signals.length:(meta.slither_findings_count!=null?meta.slither_findings_count:0));
   let pipeline=meta.pipeline_label||"";
@@ -245,7 +247,7 @@ function renderAuditData(data){
 async function analyze(){
   const code=(inputEl.value||"").trim();
   if(!code){showStatus("error","Paste a Solidity contract first.");return;}
-  hideRetry();document.getElementById("results").style.display="none";startProg();
+  hideRetry();lastAnalysisId=null;document.getElementById("results").style.display="none";startProg();
   try{
     const r=await fetch("/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({solidity_code:code})});
     const data=await r.json().catch(()=>({}));
