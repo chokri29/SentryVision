@@ -112,7 +112,7 @@ The six-requests-per-minute per-client limit and daily AI-call cap are distribut
 ## Meta models used
 
 - **Muse Spark Open** — default F2 triage / patch proposal.
-- **Muse Wonder** (optional) — stronger one-shot repair on user-triggered retry.
+- **Muse Wonder** (optional) — stronger triple-shot repair on user-triggered retry.
 
 ## Tech stack
 
