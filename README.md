@@ -87,7 +87,7 @@ When F3 **rejects** a real patch (`still_vulnerable`, `compile_failed`, `surface
 | **Trigger** | User clicks **Retry patch once** (never auto) |
 | **Server state** | Redis-backed `meta.analysis_id` — original source + findings with a 1h TTL; local in-memory fallback is for development only |
 | **Endpoint** | `POST /analyze/{analysis_id}/retry-patch` |
-| **Cap** | `MAX_PATCH_RETRIES=1` server-side |
+| **Cap** | `MAX_PATCH_RETRIES=3` server-side |
 | **Retry model** | Muse Wonder (`muse-wonder-1.0`) via Meta Model API; `LLM_RETRY_API_KEY`  |
 | **Optional Wonder** | Set `LLM_RETRY_API_KEY`, `LLM_RETRY_BASE_URL`, and `LLM_RETRY_MODEL`; separate Meta client, never the Baseten key. Without the Meta key, the retry action stays unavailable |
 
