@@ -19,8 +19,6 @@ Unlike generic scanners that output cryptic reports, SentryVision combines deter
 
 > Sentry Vision is a triage and visualization tool, **not** a formal security audit. See [Limitations](#limitations).
 
-**Live demo:** [https://sentry-vision-dyql.onrender.com](https://sentry-vision-dyql.onrender.com)
-
 ---
 
 ## Why not just Slither, or just an LLM?
