@@ -6,7 +6,9 @@
   <a href="https://sentry-vision-dyql.onrender.com/">
     <img src="https://img.shields.io/badge/try%20it%20live-open-9FE870?style=for-the-badge&logo=render&logoColor=black" alt="Try it live">
   </a>
-  <img src="https://img.shields.io/badge/demo%20video-64748b?style=for-the-badge&logo=youtube&logoColor=white" alt="https://m.youtube.com/watch?v=9igiqI_hLns">
+  <a href="https://m.youtube.com/watch?v=9igiqI_hLns" target="_blank" rel="noopener noreferrer">
+  <img src="https://img.shields.io/badge/demo%20video-64748b?style=for-the-badge&logo=youtube&logoColor=white" alt="Demo video">
+</a>
   <a href="https://github.com/chokri29/SentryVision/actions/workflows/tests.yml">
     <img src="https://img.shields.io/badge/CI-passing-28a745?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI workflow">
   </a>
