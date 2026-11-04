@@ -133,6 +133,22 @@ def solc_artifact_path(version: str) -> Optional[Path]:
     return None
 
 
+def solc_select_installed_versions() -> List[str]:
+    """Ask solc-select which versions it has (e.g. 0.8.38 on Render)."""
+    versions: List[str] = []
+    try:
+        proc = subprocess.run(
+            ["solc-select", "versions"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        for m in re.finditer(r"\b(\d+\.\d+\.\d+)\b", text):
+            versions.append(m.group(1))
+    except Exception as exc:
+        logger.warning("solc-select versions failed: %s", exc)
+    return sorted(set(v for v in versions if re.fullmatch(r"\d+\.\d+\.\d+", v)), key=Version)
+
+
 def installed_solc_versions() -> List[str]:
     versions: List[str] = []
     for root in _solc_roots():
@@ -147,6 +163,9 @@ def installed_solc_versions() -> List[str]:
     path_ver, path_bin = path_solc_info()
     if path_bin and path_ver and re.fullmatch(r"\d+\.\d+\.\d+", path_ver):
         versions.append(path_ver)
+
+    # solc-select may report versions whose binaries live outside artifact scan
+    versions.extend(solc_select_installed_versions())
 
     return sorted(set(versions), key=Version)
 
@@ -238,10 +257,32 @@ def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> O
 
 def resolve_solc_binary(version: Optional[str]):
     if not version:
+        path_ver, path_bin = path_solc_info()
+        if path_bin:
+            return path_ver, str(path_bin)
         return None, None
     path = solc_artifact_path(version) or install_solc(version)
     if path:
         return version, str(path)
+
+    # Try solc-select use <version> then re-probe PATH
+    try:
+        subprocess.run(
+            ["solc-select", "use", version],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        global _PATH_SOLC_CACHE
+        _PATH_SOLC_CACHE = None
+        path_ver, path_bin = path_solc_info()
+        if path_bin and path_ver == version:
+            return version, str(path_bin)
+        # Even if --version still mismatches, PATH solc may be the selected binary
+        if path_bin:
+            path2 = solc_artifact_path(version)
+            if path2:
+                return version, str(path2)
+    except Exception as exc:
+        logger.warning("solc-select use %s failed: %s", version, exc)
 
     path_ver, path_bin = path_solc_info()
     if path_bin and path_ver == version:
@@ -257,11 +298,23 @@ def solc_status() -> Dict[str, Any]:
     if not default_path and path_bin:
         default_path = path_bin
 
-    compilers_ready = len(versions) > 0 or bool(path_bin)
+    select_versions = solc_select_installed_versions()
+    compilers_ready = len(versions) > 0 or bool(path_bin) or len(select_versions) > 0
+    # Prefer the highest installed 0.8.x as effective default when DEFAULT is missing
+    effective_default = DEFAULT_SOLC
+    try:
+        if versions:
+            preferred = [v for v in versions if v.startswith("0.8.")]
+            if preferred:
+                effective_default = preferred[-1]
+    except Exception:
+        pass
     return {
         "default_version": DEFAULT_SOLC,
+        "effective_default": effective_default,
         "versions": versions,
         "version_count": len(versions),
+        "solc_select_versions": select_versions,
         "default_binary_found": bool(default_path),
         "default_binary_path": str(default_path) if default_path else None,
         "path_solc_version": path_ver,
