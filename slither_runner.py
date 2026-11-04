@@ -365,8 +365,8 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
             logger.warning("Slither() failed: %s", err_text)
             # A host can report either the missing requested compiler or the
             # only compiler it has. Retry once, but only with a verified binary.
-            missing_match = re.search(r"solc\\s+([0-9]+\\.[0-9]+\\.[0-9]+)\\s+not installed", err_text, re.I)
-            available_match = re.search(r"only\\s+([0-9]+\\.[0-9]+\\.[0-9]+)\\s+available", err_text, re.I)
+            missing_match = re.search(r"solc\s+([0-9]+\.[0-9]+\.[0-9]+)\s+not installed", err_text, re.I)
+            available_match = re.search(r"only\s+([0-9]+\.[0-9]+\.[0-9]+)\s+available", err_text, re.I)
             try:
                 available = sorted(set(_util_installed_solc_versions()), key=Version)
             except Exception:
@@ -390,10 +390,10 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
                     try:
                         original = sol_file.read_text(encoding="utf-8")
                         pinned = f"pragma solidity {retry_version};"
-                        if re.search(r"pragma\\s+solidity\\s+[^;]+;", original):
-                            fixed = re.sub(r"pragma\\s+solidity\\s+[^;]+;", pinned, original, count=1)
+                        if re.search(r"pragma\s+solidity\s+[^;]+;", original):
+                            fixed = re.sub(r"pragma\s+solidity\s+[^;]+;", pinned, original, count=1)
                         else:
-                            fixed = pinned + "\\n" + original
+                            fixed = pinned + "\n" + original
                         sol_file.write_text(fixed, encoding="utf-8")
                         alt_kwargs = dict(kwargs)
                         alt_kwargs["solc"] = str(retry_bin)
