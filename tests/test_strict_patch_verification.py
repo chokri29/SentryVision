@@ -196,6 +196,7 @@ def test_solc_artifact_lookup_accepts_nested_file_layout(tmp_path, monkeypatch):
     artifact = root / "artifacts" / "solc-0.8.20" / "solc-0.8.20"
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"fake-solc")
+    artifact.chmod(0o755)
     monkeypatch.setenv("SOLC_SELECT_INSTALL_DIR", str(root))
     assert slither_runner._solc_artifact_path("0.8.20") == artifact
 
