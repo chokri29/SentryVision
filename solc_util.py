@@ -268,7 +268,8 @@ def solc_status() -> Dict[str, Any]:
     if not default_binary and path_binary and path_version == effective_default:
         default_binary = path_binary
     return {
-        "default_version": DEFAULT_SOLC,
+        "default_version": effective_default or DEFAULT_SOLC,
+        "requested_default_version": DEFAULT_SOLC,
         "effective_default": effective_default,
         "versions": versions,
         "version_count": len(versions),
