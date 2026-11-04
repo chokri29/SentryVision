@@ -256,3 +256,35 @@ def test_f1_pins_source_to_verified_compiler_before_python_api(monkeypatch, sour
     assert result["detector_checks"] == ["reentrancy-eth"]
     assert captured["binary"] == "/verified/solc-0.8.38"
     assert captured["source"].startswith("pragma solidity 0.8.38;")
+
+
+def test_python_api_retries_compiler_mismatch_once(monkeypatch, tmp_path):
+    import subprocess
+    import slither.slither
+    calls = []
+
+    class FakeSlither:
+        def __init__(self, source_path, **kwargs):
+            calls.append((Path(source_path).read_text(encoding="utf-8"), kwargs.get("solc")))
+            if len(calls) == 1:
+                raise RuntimeError("solc 0.8.0 not installed, only 0.8.38 available")
+
+        def register_detector(self, _detector):
+            return None
+
+        def run_detectors(self):
+            return []
+
+    from pathlib import Path
+    source = tmp_path / "Legacy.sol"
+    source.write_text("pragma solidity ^0.8.0; contract Legacy {}", encoding="utf-8")
+    monkeypatch.setattr(slither.slither, "Slither", FakeSlither)
+    monkeypatch.setattr(slither_runner, "_util_installed_solc_versions", lambda: ["0.8.38"])
+    monkeypatch.setattr(slither_runner, "_util_resolve_solc_binary", lambda version: (version, "/verified/solc-0.8.38"))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
+
+    result = slither_runner._run_slither_python_api(source, "/missing/solc-0.8.0")
+    assert result["success"] is True
+    assert len(calls) == 2
+    assert calls[1][0].startswith("pragma solidity 0.8.38;")
+    assert calls[1][1] == "/verified/solc-0.8.38"
