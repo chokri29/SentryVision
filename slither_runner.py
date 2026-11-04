@@ -32,7 +32,7 @@ logger = logging.getLogger("sentryvision.slither")
 
 SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
-DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20").strip() or "0.8.20"
+DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.38").strip() or "0.8.38"
 KEEP_IMPACTS = {"High", "Medium"}
 PRIORITY_CHECKS = {
     "reentrancy-eth", "reentrancy-no-eth", "reentrancy-benign", "reentrancy-events",
@@ -363,52 +363,53 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
         if sl is None and init_err is not None:
             err_text = str(init_err)
             logger.warning("Slither() failed: %s", err_text)
-            # e.g. "solc 0.8.0 not installed, only 0.8.38 available"
-            m = re.search(r"only\s+([0-9]+\.[0-9]+\.[0-9]+)\s+available", err_text, re.I)
-            if not m:
-                m = re.search(r"solc\s+([0-9]+\.[0-9]+\.[0-9]+)\s+not installed", err_text, re.I)
-                # If we only know the missing version, try highest preferred installed
-                if m:
-                    try:
-                        from solc_util import solc_select_installed_versions, installed_solc_versions as _iv
-                        avail = sorted(set(_iv()) | set(solc_select_installed_versions()), key=Version)
-                        if avail:
-                            # synthesize match for retry path below
-                            class _M:
-                                def group(self, _i):
-                                    return avail[-1]
-                            m = _M()
-                    except Exception:
-                        m = None
-            if m:
-                alt = m.group(1)
-                logger.info("Retrying Slither with host solc %s", alt)
+            # A host can report either the missing requested compiler or the
+            # only compiler it has. Retry once, but only with a verified binary.
+            missing_match = re.search(r"solc\\s+([0-9]+\\.[0-9]+\\.[0-9]+)\\s+not installed", err_text, re.I)
+            available_match = re.search(r"only\\s+([0-9]+\\.[0-9]+\\.[0-9]+)\\s+available", err_text, re.I)
+            try:
+                available = sorted(set(_util_installed_solc_versions()), key=Version)
+            except Exception:
+                available = []
+            retry_version = None
+            if available_match and available_match.group(1) in available:
+                retry_version = available_match.group(1)
+            elif missing_match and available:
+                retry_version = available[-1]
+            if retry_version:
+                logger.info("Retrying Slither Python API once with installed solc %s", retry_version)
                 try:
-                    subprocess.run(["solc-select", "use", alt], capture_output=True, text=True, timeout=60, check=False)
-                except Exception:
-                    pass
-                # Rewrite pragma to exact available version so compile matches
-                try:
-                    fixed = re.sub(
-                        r"pragma\s+solidity\s+[^;]+;",
-                        f"pragma solidity {alt};",
-                        sol_file.read_text(encoding="utf-8"),
-                        count=1,
+                    subprocess.run(
+                        ["solc-select", "use", retry_version],
+                        capture_output=True, text=True, timeout=60, check=False,
                     )
-                    sol_file.write_text(fixed, encoding="utf-8")
-                except Exception:
-                    pass
-                alt_bin = None
-                try:
-                    from solc_util import resolve_solc_binary as _rs
-                    _, alt_bin = _rs(alt)
-                except Exception:
-                    alt_bin = solc_bin
-                alt_kw = dict(kwargs)
-                if alt_bin:
-                    alt_kw["solc"] = str(alt_bin)
-                sl, init_err = _init_slither(sol_file, alt_kw)
+                except Exception as exc:
+                    logger.warning("solc-select use %s failed: %s", retry_version, exc)
+                resolved_version, retry_bin = _util_resolve_solc_binary(retry_version)
+                if retry_bin and resolved_version == retry_version:
+                    try:
+                        original = sol_file.read_text(encoding="utf-8")
+                        pinned = f"pragma solidity {retry_version};"
+                        if re.search(r"pragma\\s+solidity\\s+[^;]+;", original):
+                            fixed = re.sub(r"pragma\\s+solidity\\s+[^;]+;", pinned, original, count=1)
+                        else:
+                            fixed = pinned + "\\n" + original
+                        sol_file.write_text(fixed, encoding="utf-8")
+                        alt_kwargs = dict(kwargs)
+                        alt_kwargs["solc"] = str(retry_bin)
+                        parent = str(Path(retry_bin).parent)
+                        os.environ["PATH"] = parent + os.pathsep + os.environ.get("PATH", "")
+                        os.environ["SOLC_BINARY"] = str(retry_bin)
+                        os.environ["SOLC"] = str(retry_bin)
+                        sl, init_err = _init_slither(sol_file, alt_kwargs)
+                    except Exception as retry_exc:
+                        init_err = retry_exc
+                else:
+                    init_err = RuntimeError(
+                        f"Compiler {retry_version} was reported but no matching executable binary could be resolved"
+                    )
             if sl is None:
+                error_text = str(init_err or err_text)
                 return {
                     "success": False,
                     "detectors": [],
@@ -417,8 +418,8 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
                     "count": 0,
                     "filtered_count": 0,
                     "raw": None,
-                    "error": f"Slither API init failed: {init_err}",
-                    "error_kind": _classify_slither_error(str(init_err)),
+                    "error": f"Slither compile failed: {error_text}",
+                    "error_kind": _classify_slither_error(error_text) or "compile_failed",
                 }
 
         # Register stock detectors if not already present
@@ -518,41 +519,27 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
     if require_pragma and not pragma_match:
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: patch has no Solidity pragma.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
-    selected_version = _extract_solc_version(source_code)
-    # Always coerce to a compiler that is actually installed on this host
+    # Select only verified installed binaries. Do not trust solc-select's
+    # inventory unless the corresponding executable can actually be resolved.
     try:
-        from solc_util import solc_select_installed_versions, installed_solc_versions as _iv
-        available = sorted(set(_iv()) | set(solc_select_installed_versions()), key=Version)
-        if available:
-            if not selected_version or selected_version not in available:
-                pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
-                if pragma_m:
-                    try:
-                        constraint = NpmSpec(pragma_m.group(1).strip())
-                        matching = [v for v in available if constraint.match(Version(v))]
-                        selected_version = sorted(matching, key=Version)[-1] if matching else available[-1]
-                    except ValueError:
-                        selected_version = available[-1]
-                else:
-                    # No pragma (legacy 0.4-style): use highest available; compile may still fail
-                    selected_version = available[-1]
-                logger.info("Coerced solc selection to installed %s (available=%s)", selected_version, available)
-            else:
-                # Prefer highest matching available for caret/range pragmas
-                pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
-                if pragma_m:
-                    try:
-                        constraint = NpmSpec(pragma_m.group(1).strip())
-                        matching = [v for v in available if constraint.match(Version(v))]
-                        if matching:
-                            best = sorted(matching, key=Version)[-1]
-                            if best != selected_version:
-                                logger.info("Upgrading selected solc %s → %s", selected_version, best)
-                                selected_version = best
-                    except ValueError:
-                        pass
+        available = sorted(set(_installed_solc_versions()), key=Version)
     except Exception as exc:
-        logger.warning("solc version coercion failed: %s", exc)
+        logger.warning("Could not enumerate installed solc binaries: %s", exc)
+        available = []
+    selected_version = None
+    if available:
+        if pragma_match:
+            try:
+                constraint = NpmSpec(pragma_match.group(1).strip())
+                matching = [version for version in available if constraint.match(Version(version))]
+                selected_version = matching[-1] if matching else available[-1]
+            except ValueError:
+                selected_version = available[-1]
+        else:
+            # Legacy/no-pragma sources use the highest installed compiler;
+            # real syntax incompatibility is returned as a compile error.
+            selected_version = available[-1]
+        logger.info("F1 selected verified solc %s from installed=%s", selected_version, available)
     if not selected_version:
         path_ver, path_bin = _util_path_solc_info()
         detail = (
@@ -588,7 +575,10 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         if api_result is not None and api_result.get("success"):
             return api_result
         if api_result is not None and api_result.get("error"):
-            logger.warning("Python API path failed: %s — falling back to CLI", api_result.get("error"))
+            # The Python API is the preferred path on Render. Do not re-enter
+            # the CLI parser after an API compile error (argparse incompatibility).
+            logger.warning("Python API path failed; returning its compile result without CLI fallback: %s", api_result.get("error"))
+            return api_result
 
         try:
             proc, run_err = _run_slither_process(sol_file, out_file, solc_bin, tmp_path)
