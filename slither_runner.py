@@ -141,11 +141,74 @@ def unsupported_imports(source: str) -> List[str]:
             found.append(path)
     return found
 
-def _slither_command(sol_file: Path, out_file: Path, solc_bin: Optional[str]) -> List[str]:
+def _slither_command(sol_file: Path, out_file: Path, solc_bin: Optional[str], *, use_solc_flag: bool = True) -> List[str]:
+    """Build a Slither CLI invocation.
+
+    Prefer relative paths under cwd. Only pass --solc when needed; some Slither /
+    crytic-compile builds raise argparse.ArgumentTypeError on absolute --solc paths
+    (common on Render venv layouts).
+    """
     cmd = ["slither", str(sol_file), "--json", str(out_file)]
-    if solc_bin:
-        cmd.extend(["--solc", solc_bin])
+    if use_solc_flag and solc_bin:
+        cmd.extend(["--solc", str(solc_bin)])
     return cmd
+
+
+def _run_slither_process(sol_file: Path, out_file: Path, solc_bin: Optional[str], tmp_path: Path):
+    """Try several CLI shapes; return the first process that produces JSON or the last attempt."""
+    # Relative paths avoid some argparse / path-type failures
+    sol_rel = sol_file.name
+    out_rel = out_file.name
+    env = os.environ.copy()
+    if solc_bin:
+        solc_path = Path(solc_bin)
+        if solc_path.parent.is_dir():
+            env["PATH"] = str(solc_path.parent) + os.pathsep + env.get("PATH", "")
+        env["SOLC_BINARY"] = str(solc_bin)
+        # crytic-compile respects this in several versions
+        env["SOLC"] = str(solc_bin)
+
+    attempts = [
+        # 1) No --solc: rely on PATH / SOLC_BINARY (avoids ArgumentTypeError on --solc)
+        _slither_command(Path(sol_rel), Path(out_rel), solc_bin, use_solc_flag=False),
+        # 2) With --solc absolute path
+        _slither_command(Path(sol_rel), Path(out_rel), solc_bin, use_solc_flag=True),
+        # 3) Absolute target path, no --solc
+        _slither_command(sol_file, out_file, solc_bin, use_solc_flag=False),
+    ]
+
+    last_proc = None
+    last_err = ""
+    for cmd in attempts:
+        if out_file.exists():
+            try:
+                out_file.unlink()
+            except OSError:
+                pass
+        logger.info("F1 running: %s", " ".join(cmd))
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=SLITHER_TIMEOUT,
+                cwd=str(tmp_path), env=env,
+            )
+        except subprocess.TimeoutExpired:
+            raise
+        except Exception as exc:
+            last_err = str(exc)
+            last_proc = None
+            continue
+        last_proc = proc
+        combined = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
+        last_err = combined
+        if out_file.exists() and out_file.stat().st_size > 0:
+            return proc, None
+        # argparse.ArgumentTypeError → try next shape
+        if "ArgumentTypeError" in combined or "argparse" in combined.lower():
+            logger.warning("Slither CLI argparse failure, trying alternate invocation: %s", combined[:240])
+            continue
+        # Other failures: still return this proc (caller inspects JSON / error)
+        return proc, combined
+    return last_proc, last_err
 
 def _solc_artifact_path(version: str) -> Optional[Path]:
     return _util_solc_artifact_path(version)
@@ -201,6 +264,8 @@ def _classify_slither_error(error: Optional[str]) -> str:
         return "execution_error"
     if "timed out" in text or "timeout" in text:
         return "timeout"
+    if "argumenttypeerror" in text or "argparse" in text:
+        return "execution_error"
     compile_markers = ("invalidcompilation", "compilererror", "compilation failed", "compile", "parsererror", "solc", "source file requires different compiler", "not found: file", "declarationerror", "typeerror", "syntax error")
     if any(marker in text for marker in compile_markers):
         return "compile_failed"
@@ -281,14 +346,18 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         sol_file.write_text(source, encoding="utf-8")
         logger.info("F1 Slither using solc %s at %s", solc_ver, solc_bin)
         try:
-            proc = subprocess.run(_slither_command(sol_file, out_file, solc_bin), capture_output=True, text=True, timeout=SLITHER_TIMEOUT, cwd=str(tmp_path))
+            proc, run_err = _run_slither_process(sol_file, out_file, solc_bin, tmp_path)
         except subprocess.TimeoutExpired:
             return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": f"Slither timed out after {SLITHER_TIMEOUT}s", "error_kind": "timeout"}
         except Exception as exc:
             err = str(exc)
             return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": err, "error_kind": _classify_slither_error(err)}
         if not out_file.exists():
-            err = _short_error(proc.stderr or proc.stdout or "Slither produced no JSON output")
+            err = _short_error(
+                (run_err or "")
+                or ((proc.stderr if proc else "") or (proc.stdout if proc else "") or "")
+                or "Slither produced no JSON output"
+            )
             return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": err, "error_kind": _classify_slither_error(err)}
         try:
             raw = json.loads(out_file.read_text(encoding="utf-8"))
