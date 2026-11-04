@@ -32,7 +32,7 @@ logger = logging.getLogger("sentryvision.slither")
 
 SLITHER_TIMEOUT = int(os.getenv("SLITHER_TIMEOUT_SECONDS", "90"))
 ENABLE_SLITHER = os.getenv("ENABLE_SLITHER", "true").strip().lower() in {"1", "true", "yes", "on"}
-DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20")
+DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20").strip() or "0.8.20"
 KEEP_IMPACTS = {"High", "Medium"}
 PRIORITY_CHECKS = {
     "reentrancy-eth", "reentrancy-no-eth", "reentrancy-benign", "reentrancy-events",
@@ -365,6 +365,21 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
             logger.warning("Slither() failed: %s", err_text)
             # e.g. "solc 0.8.0 not installed, only 0.8.38 available"
             m = re.search(r"only\s+([0-9]+\.[0-9]+\.[0-9]+)\s+available", err_text, re.I)
+            if not m:
+                m = re.search(r"solc\s+([0-9]+\.[0-9]+\.[0-9]+)\s+not installed", err_text, re.I)
+                # If we only know the missing version, try highest preferred installed
+                if m:
+                    try:
+                        from solc_util import solc_select_installed_versions, installed_solc_versions as _iv
+                        avail = sorted(set(_iv()) | set(solc_select_installed_versions()), key=Version)
+                        if avail:
+                            # synthesize match for retry path below
+                            class _M:
+                                def group(self, _i):
+                                    return avail[-1]
+                            m = _M()
+                    except Exception:
+                        m = None
             if m:
                 alt = m.group(1)
                 logger.info("Retrying Slither with host solc %s", alt)
@@ -504,25 +519,40 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: patch has no Solidity pragma.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
     selected_version = _extract_solc_version(source_code)
-    # If Slither host only has a newer 0.8.x (e.g. 0.8.38), prefer it over a stale 0.8.0 pin
+    # Always coerce to a compiler that is actually installed on this host
     try:
         from solc_util import solc_select_installed_versions, installed_solc_versions as _iv
         available = sorted(set(_iv()) | set(solc_select_installed_versions()), key=Version)
-        if selected_version and available:
-            pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
-            spec = pragma_m.group(1).strip() if pragma_m else f"^{selected_version}"
-            try:
-                constraint = NpmSpec(spec)
-                matching = [v for v in available if constraint.match(Version(v))]
-                if matching:
-                    best = sorted(matching, key=Version)[-1]
-                    if best != selected_version:
-                        logger.info("Upgrading selected solc %s → %s (available on host)", selected_version, best)
-                        selected_version = best
-            except ValueError:
-                pass
+        if available:
+            if not selected_version or selected_version not in available:
+                pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+                if pragma_m:
+                    try:
+                        constraint = NpmSpec(pragma_m.group(1).strip())
+                        matching = [v for v in available if constraint.match(Version(v))]
+                        selected_version = sorted(matching, key=Version)[-1] if matching else available[-1]
+                    except ValueError:
+                        selected_version = available[-1]
+                else:
+                    # No pragma (legacy 0.4-style): use highest available; compile may still fail
+                    selected_version = available[-1]
+                logger.info("Coerced solc selection to installed %s (available=%s)", selected_version, available)
+            else:
+                # Prefer highest matching available for caret/range pragmas
+                pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+                if pragma_m:
+                    try:
+                        constraint = NpmSpec(pragma_m.group(1).strip())
+                        matching = [v for v in available if constraint.match(Version(v))]
+                        if matching:
+                            best = sorted(matching, key=Version)[-1]
+                            if best != selected_version:
+                                logger.info("Upgrading selected solc %s → %s", selected_version, best)
+                                selected_version = best
+                    except ValueError:
+                        pass
     except Exception as exc:
-        logger.warning("solc version upgrade probe failed: %s", exc)
+        logger.warning("solc version coercion failed: %s", exc)
     if not selected_version:
         path_ver, path_bin = _util_path_solc_info()
         detail = (
