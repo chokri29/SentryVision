@@ -28,7 +28,7 @@ def _env_default_solc() -> str:
     """Pick a default solc that actually exists when possible."""
     requested = (os.getenv("SOLC_VERSION") or "").strip()
     # Prefer explicit env only as a hint — still validated later
-    return requested or "0.8.20"
+    return requested or "0.8.38"
 
 
 DEFAULT_SOLC = _env_default_solc()
@@ -159,24 +159,22 @@ def solc_select_installed_versions() -> List[str]:
 
 
 def installed_solc_versions() -> List[str]:
-    versions: List[str] = []
+    """Return only compiler versions backed by an executable binary."""
+    candidates: set[str] = set()
     for root in _solc_roots():
         artifacts = root / "artifacts"
-        if not artifacts.is_dir():
-            continue
-        for item in artifacts.glob("solc-*"):
-            version = item.name.removeprefix("solc-")
-            if re.fullmatch(r"\d+\.\d+\.\d+", version) and solc_artifact_path(version):
-                versions.append(version)
-
-    path_ver, path_bin = path_solc_info()
-    if path_bin and path_ver and re.fullmatch(r"\d+\.\d+\.\d+", path_ver):
-        versions.append(path_ver)
-
-    # solc-select may report versions whose binaries live outside artifact scan
-    versions.extend(solc_select_installed_versions())
-
-    return sorted(set(versions), key=Version)
+        if artifacts.is_dir():
+            for item in artifacts.glob("solc-*"):
+                version = item.name.removeprefix("solc-")
+                if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", version):
+                    candidates.add(version)
+    # solc-select inventory is discovery metadata, not proof of a usable binary.
+    candidates.update(solc_select_installed_versions())
+    path_version, path_binary = path_solc_info()
+    if path_binary and path_version and re.fullmatch(r"\\d+\\.\\d+\\.\\d+", path_version):
+        candidates.add(path_version)
+    verified = [version for version in candidates if solc_artifact_path(version)]
+    return sorted(set(verified), key=Version)
 
 
 def install_solc(version: str) -> Optional[Path]:
@@ -216,140 +214,70 @@ def install_solc(version: str) -> Optional[Path]:
 
 
 def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
-    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+    """Choose the highest verified installed compiler compatible with the pragma."""
+    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
     if require_pragma and not match:
         return None
-    spec = match.group(1).strip() if match else DEFAULT_SOLC
-    try:
-        constraint = NpmSpec(spec)
-    except ValueError:
-        logger.warning("Unsupported Solidity pragma constraint: %s", spec)
-        return None
-
     available = installed_solc_versions()
-    # Merge solc-select reported versions even if binary path not resolved yet
-    try:
-        available = sorted(set(available) | set(solc_select_installed_versions()), key=Version)
-    except Exception:
-        pass
-
-    matches = [v for v in available if constraint.match(Version(v))]
-    if matches:
-        return sorted(matches, key=Version)[-1]
-
-    path_ver, path_bin = path_solc_info()
-    if path_bin and path_ver:
-        try:
-            if constraint.match(Version(path_ver)):
-                return path_ver
-        except ValueError:
-            pass
-
-    # Exact version requested — try install / solc-select use
-    if re.fullmatch(r"\d+\.\d+\.\d+", spec):
-        if install_solc(spec):
-            return spec
-        # Never return a version that is not installed
-        if available:
-            try:
-                # closest higher matching major.minor if any
-                same_minor = [v for v in available if v.startswith(spec.rsplit(".", 1)[0])]
-                if same_minor:
-                    return sorted(same_minor, key=Version)[-1]
-                return sorted(available, key=Version)[-1]
-            except Exception:
-                return available[-1]
+    if not available:
         return None
-
-    for candidate in _PREFERRED_SOLC:
+    if match:
+        spec = match.group(1).strip()
         try:
-            if not constraint.match(Version(candidate)):
-                continue
-            if candidate in available or install_solc(candidate):
-                return candidate
-        except Exception:
-            continue
-
-    # Any available version that satisfies the pragma
-    if matches:
-        return sorted(matches, key=Version)[-1]
-
-    # Last resort: highest installed compiler (better than demanding missing 0.8.0)
-    if available:
-        logger.warning("No exact pragma match; using highest installed solc %s", available[-1])
-        return available[-1]
-
-    if path_bin and path_ver:
-        return path_ver
-
-    return None
+            constraint = NpmSpec(spec)
+            compatible = [v for v in available if constraint.match(Version(v))]
+            if compatible:
+                return sorted(compatible, key=Version)[-1]
+            logger.warning("No installed solc satisfies pragma %s; using highest installed %s for compile diagnostics", spec, available[-1])
+        except ValueError:
+            logger.warning("Unsupported Solidity pragma %s; using highest installed compiler", spec)
+    # No pragma / unsupported pragma / no compatible compiler: never return
+    # DEFAULT_SOLC blindly. The caller pins its temporary source to this binary.
+    return available[-1]
 
 
 def resolve_solc_binary(version: Optional[str]):
-    if not version:
-        path_ver, path_bin = path_solc_info()
-        if path_bin:
-            return path_ver, str(path_bin)
-        return None, None
-    path = solc_artifact_path(version) or install_solc(version)
-    if path:
-        return version, str(path)
-
-    # Try solc-select use <version> then re-probe PATH
-    try:
-        subprocess.run(
-            ["solc-select", "use", version],
-            capture_output=True, text=True, timeout=60, check=False,
-        )
+    """Resolve only a verified compiler; never return a requested missing version."""
+    if version:
+        path = solc_artifact_path(version)
+        if path:
+            return version, str(path)
+        try:
+            subprocess.run(["solc-select", "use", version], capture_output=True, text=True, timeout=60, check=False)
+        except Exception as exc:
+            logger.warning("solc-select use %s failed: %s", version, exc)
         global _PATH_SOLC_CACHE
         _PATH_SOLC_CACHE = None
-        path_ver, path_bin = path_solc_info()
-        if path_bin and path_ver == version:
-            return version, str(path_bin)
-        # Even if --version still mismatches, PATH solc may be the selected binary
-        if path_bin:
-            path2 = solc_artifact_path(version)
-            if path2:
-                return version, str(path2)
-    except Exception as exc:
-        logger.warning("solc-select use %s failed: %s", version, exc)
-
-    path_ver, path_bin = path_solc_info()
-    if path_bin and path_ver == version:
-        return version, str(path_bin)
-
-    return version, None
+        path_version, path_binary = path_solc_info()
+        if path_binary and path_version == version:
+            return version, str(path_binary)
+        return None, None
+    path_version, path_binary = path_solc_info()
+    if path_binary and path_version:
+        return path_version, str(path_binary)
+    return None, None
 
 
 def solc_status() -> Dict[str, Any]:
-    path_ver, path_bin = path_solc_info()
+    path_version, path_binary = path_solc_info()
     versions = installed_solc_versions()
-    default_path = solc_artifact_path(DEFAULT_SOLC)
-    if not default_path and path_bin:
-        default_path = path_bin
-
     select_versions = solc_select_installed_versions()
-    compilers_ready = len(versions) > 0 or bool(path_bin) or len(select_versions) > 0
-    # Prefer the highest installed 0.8.x as effective default when DEFAULT is missing
-    effective_default = DEFAULT_SOLC
-    try:
-        if versions:
-            preferred = [v for v in versions if v.startswith("0.8.")]
-            if preferred:
-                effective_default = preferred[-1]
-    except Exception:
-        pass
+    preferred = [v for v in versions if v.startswith("0.8.")]
+    effective_default = preferred[-1] if preferred else (versions[-1] if versions else None)
+    default_binary = solc_artifact_path(effective_default) if effective_default else None
+    if not default_binary and path_binary and path_version == effective_default:
+        default_binary = path_binary
     return {
         "default_version": DEFAULT_SOLC,
         "effective_default": effective_default,
         "versions": versions,
         "version_count": len(versions),
         "solc_select_versions": select_versions,
-        "default_binary_found": bool(default_path),
-        "default_binary_path": str(default_path) if default_path else None,
-        "path_solc_version": path_ver,
-        "path_solc_binary": str(path_bin) if path_bin else None,
-        "compilers_ready": compilers_ready,
-        "search_roots": [str(r) for r in _solc_roots()],
+        "default_binary_found": bool(default_binary),
+        "default_binary_path": str(default_binary) if default_binary else None,
+        "path_solc_version": path_version,
+        "path_solc_binary": str(path_binary) if path_binary else None,
+        "compilers_ready": bool(versions),
+        "search_roots": [str(root) for root in _solc_roots()],
         "solc_select_install_dir": os.getenv("SOLC_SELECT_INSTALL_DIR"),
     }
