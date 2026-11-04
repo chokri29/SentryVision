@@ -1,4 +1,8 @@
-"""Solc binary resolution helpers for SentryVision F1/F3."""
+"""Solc binary resolution helpers for SentryVision F1/F3.
+
+Handles both solc-select artifact layouts (Docker image) and a plain
+`solc` on PATH (Render native / venv installs).
+"""
 from __future__ import annotations
 
 import logging
@@ -7,7 +11,7 @@ import re
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from semantic_version import NpmSpec, Version
 
@@ -20,9 +24,10 @@ _PREFERRED_SOLC = (
     "0.8.13", "0.8.10", "0.8.7", "0.8.4", "0.8.0",
 )
 
+_PATH_SOLC_CACHE: Optional[Tuple[Optional[str], Optional[Path]]] = None
+
 
 def _solc_roots() -> List[Path]:
-    """All directories that may hold solc-select artifacts (order: env, home, system)."""
     roots: List[Path] = []
     seen = set()
 
@@ -39,33 +44,11 @@ def _solc_roots() -> List[Path]:
     if env_root:
         add(Path(env_root))
     add(Path.home() / ".solc-select")
-    # Dockerfile installs under appuser even if the process user differs
     add(Path("/home/appuser/.solc-select"))
+    add(Path("/opt/render/.solc-select"))
     add(Path("/usr/local/lib/solc-select"))
     add(Path("/opt/solc-select"))
     return roots
-
-
-def solc_artifact_path(version: str) -> Optional[Path]:
-    """Locate a solc binary for *version* across known solc-select layouts."""
-    candidates: List[Path] = []
-    for root in _solc_roots():
-        art = root / "artifacts"
-        candidates.append(art / f"solc-{version}")
-        candidates.append(art / f"solc-{version}" / f"solc-{version}")
-        candidates.append(art / f"solc-{version}" / "solc")
-    # PATH fallback (solc-select use may put a symlink on PATH)
-    for name in (f"solc-{version}", "solc"):
-        which = _which(name)
-        if which:
-            candidates.append(Path(which))
-    for candidate in candidates:
-        try:
-            if candidate.is_file() and candidate.stat().st_size > 0 and os.access(candidate, os.X_OK):
-                return candidate
-        except OSError:
-            continue
-    return None
 
 
 def _which(name: str) -> Optional[str]:
@@ -75,6 +58,79 @@ def _which(name: str) -> Optional[str]:
         return path or None
     except Exception:
         return None
+
+
+def _parse_solc_version_output(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = re.search(r"Version:\s*(\d+\.\d+\.\d+)", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(\d+\.\d+\.\d+)\+commit", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(\d+\.\d+\.\d+)\b", text)
+    return m.group(1) if m else None
+
+
+def path_solc_info() -> Tuple[Optional[str], Optional[Path]]:
+    """Return (version, path) for the first usable `solc` on PATH."""
+    global _PATH_SOLC_CACHE
+    if _PATH_SOLC_CACHE is not None:
+        return _PATH_SOLC_CACHE
+
+    path_str = _which("solc")
+    if not path_str:
+        _PATH_SOLC_CACHE = (None, None)
+        return _PATH_SOLC_CACHE
+
+    path = Path(path_str)
+    try:
+        if not (path.is_file() and os.access(path, os.X_OK)):
+            _PATH_SOLC_CACHE = (None, None)
+            return _PATH_SOLC_CACHE
+    except OSError:
+        _PATH_SOLC_CACHE = (None, None)
+        return _PATH_SOLC_CACHE
+
+    version = None
+    try:
+        proc = subprocess.run(
+            [str(path), "--version"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        version = _parse_solc_version_output((proc.stdout or "") + "\n" + (proc.stderr or ""))
+    except Exception as exc:
+        logger.warning("Could not run PATH solc --version: %s", exc)
+
+    _PATH_SOLC_CACHE = (version, path)
+    return _PATH_SOLC_CACHE
+
+
+def solc_artifact_path(version: str) -> Optional[Path]:
+    candidates: List[Path] = []
+    for root in _solc_roots():
+        art = root / "artifacts"
+        candidates.append(art / f"solc-{version}")
+        candidates.append(art / f"solc-{version}" / f"solc-{version}")
+        candidates.append(art / f"solc-{version}" / "solc")
+
+    which_ver = _which(f"solc-{version}")
+    if which_ver:
+        candidates.append(Path(which_ver))
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 0 and os.access(candidate, os.X_OK):
+                return candidate
+        except OSError:
+            continue
+
+    path_ver, path_bin = path_solc_info()
+    if path_bin and path_ver == version:
+        return path_bin
+
+    return None
 
 
 def installed_solc_versions() -> List[str]:
@@ -87,6 +143,11 @@ def installed_solc_versions() -> List[str]:
             version = item.name.removeprefix("solc-")
             if re.fullmatch(r"\d+\.\d+\.\d+", version) and solc_artifact_path(version):
                 versions.append(version)
+
+    path_ver, path_bin = path_solc_info()
+    if path_bin and path_ver and re.fullmatch(r"\d+\.\d+\.\d+", path_ver):
+        versions.append(path_ver)
+
     return sorted(set(versions), key=Version)
 
 
@@ -94,6 +155,11 @@ def install_solc(version: str) -> Optional[Path]:
     existing = solc_artifact_path(version)
     if existing:
         return existing
+
+    path_ver, path_bin = path_solc_info()
+    if path_bin and path_ver == version:
+        return path_bin
+
     with _SOLC_LOCK:
         existing = solc_artifact_path(version)
         if existing:
@@ -109,6 +175,8 @@ def install_solc(version: str) -> Optional[Path]:
         except Exception as exc:
             logger.warning("solc-select install %s failed: %s", version, exc)
             return None
+        global _PATH_SOLC_CACHE
+        _PATH_SOLC_CACHE = None
         path = solc_artifact_path(version)
         if path:
             return path
@@ -129,22 +197,42 @@ def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> O
     except ValueError:
         logger.warning("Unsupported Solidity pragma constraint: %s", spec)
         return None
+
     matches = [v for v in installed_solc_versions() if constraint.match(Version(v))]
     if matches:
         return sorted(matches, key=Version)[-1]
+
+    path_ver, path_bin = path_solc_info()
+    if path_bin and path_ver:
+        try:
+            if constraint.match(Version(path_ver)):
+                return path_ver
+        except ValueError:
+            pass
+
     if re.fullmatch(r"\d+\.\d+\.\d+", spec):
         return spec if install_solc(spec) else None
+
     for candidate in _PREFERRED_SOLC:
         try:
             if constraint.match(Version(candidate)) and install_solc(candidate):
                 return candidate
         except Exception:
             continue
+
     try:
         if constraint.match(Version(DEFAULT_SOLC)) and install_solc(DEFAULT_SOLC):
             return DEFAULT_SOLC
     except Exception:
         pass
+
+    if path_bin and path_ver:
+        try:
+            if constraint.match(Version(path_ver)):
+                return path_ver
+        except ValueError:
+            pass
+
     return None
 
 
@@ -152,21 +240,33 @@ def resolve_solc_binary(version: Optional[str]):
     if not version:
         return None, None
     path = solc_artifact_path(version) or install_solc(version)
-    return (version, str(path)) if path else (version, None)
+    if path:
+        return version, str(path)
+
+    path_ver, path_bin = path_solc_info()
+    if path_bin and path_ver == version:
+        return version, str(path_bin)
+
+    return version, None
 
 
 def solc_status() -> Dict[str, Any]:
-    """Runtime compiler visibility for /health and diagnostics."""
+    path_ver, path_bin = path_solc_info()
     versions = installed_solc_versions()
     default_path = solc_artifact_path(DEFAULT_SOLC)
-    roots = [str(r) for r in _solc_roots()]
+    if not default_path and path_bin:
+        default_path = path_bin
+
+    compilers_ready = len(versions) > 0 or bool(path_bin)
     return {
         "default_version": DEFAULT_SOLC,
         "versions": versions,
         "version_count": len(versions),
         "default_binary_found": bool(default_path),
         "default_binary_path": str(default_path) if default_path else None,
-        "compilers_ready": len(versions) > 0,
-        "search_roots": roots,
+        "path_solc_version": path_ver,
+        "path_solc_binary": str(path_bin) if path_bin else None,
+        "compilers_ready": compilers_ready,
+        "search_roots": [str(r) for r in _solc_roots()],
         "solc_select_install_dir": os.getenv("SOLC_SELECT_INSTALL_DIR"),
     }
