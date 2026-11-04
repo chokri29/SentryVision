@@ -40,8 +40,8 @@ RUN solc-select install 0.8.4 0.8.7 0.8.10 0.8.13 0.8.16 0.8.17 0.8.19 0.8.20 0.
     && ls -la /home/appuser/.solc-select/artifacts/ \
     && (find /home/appuser/.solc-select -type f -name 'solc*' | head -40) \
     && test -e /home/appuser/.solc-select/artifacts/solc-0.8.38 \
-       -o -e /home/appuser/.solc-select/artifacts/solc-0.8.20/solc-0.8.20 \
-       -o -e /home/appuser/.solc-select/artifacts/solc-0.8.20/solc
+       -o -e /home/appuser/.solc-select/artifacts/solc-0.8.38/solc-0.8.38 \
+       -o -e /home/appuser/.solc-select/artifacts/solc-0.8.38/solc
 
 USER root
 COPY main.py slither_runner.py solc_util.py solc_patch.py index.html ./
