@@ -166,12 +166,12 @@ def installed_solc_versions() -> List[str]:
         if artifacts.is_dir():
             for item in artifacts.glob("solc-*"):
                 version = item.name.removeprefix("solc-")
-                if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", version):
+                if re.fullmatch(r"\d+\.\d+\.\d+", version):
                     candidates.add(version)
     # solc-select inventory is discovery metadata, not proof of a usable binary.
     candidates.update(solc_select_installed_versions())
     path_version, path_binary = path_solc_info()
-    if path_binary and path_version and re.fullmatch(r"\\d+\\.\\d+\\.\\d+", path_version):
+    if path_binary and path_version and re.fullmatch(r"\d+\.\d+\.\d+", path_version):
         candidates.add(path_version)
     verified = [version for version in candidates if solc_artifact_path(version)]
     return sorted(set(verified), key=Version)
@@ -215,7 +215,7 @@ def install_solc(version: str) -> Optional[Path]:
 
 def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
     """Choose the highest verified installed compiler compatible with the pragma."""
-    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if require_pragma and not match:
         return None
     available = installed_solc_versions()
