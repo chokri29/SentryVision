@@ -47,6 +47,22 @@ except Exception:
         return []
 
 
+try:
+    from solc_util import solc_status as _solc_status
+except Exception:
+    def _solc_status():
+        return {
+            "default_version": os.getenv("SOLC_VERSION", "0.8.20"),
+            "versions": [],
+            "version_count": 0,
+            "default_binary_found": False,
+            "default_binary_path": None,
+            "compilers_ready": False,
+            "search_roots": [],
+            "solc_select_install_dir": os.getenv("SOLC_SELECT_INSTALL_DIR"),
+        }
+
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -447,9 +463,19 @@ def parse_retry_output(raw: str) -> RetryLLMOutput:
     return RetryLLMOutput.model_validate(json.loads(extract_json_text(raw)))
 
 
-def format_slither_for_prompt(detectors: list) -> str:
+def format_slither_for_prompt(detectors: list, *, slither_error: Optional[str] = None) -> str:
+    if slither_error:
+        return (
+            f"STATIC ANALYSIS UNAVAILABLE: {slither_error}\n"
+            "Do NOT claim Slither reported zero findings or that the contract is clean. "
+            "Slither did not successfully analyze this contract. "
+            "Treat every finding as model-only (ungrounded / f1_unavailable) and say so in the summary."
+        )
     if not detectors:
-        return "(no Slither findings)"
+        return (
+            "(Slither ran successfully and reported no detector hits in the filtered set. "
+            "You may still report clear manual issues, but mark them ungrounded.)"
+        )
     lines = []
     for d in detectors[:30]:
         check = d.get("check") or d.get("name") or "unknown"
@@ -632,7 +658,7 @@ def parse_and_validate_model_output(raw: str) -> LLMOutput:
 
 SYSTEM_PROMPT = """You are an expert Web3 security auditor. Analyze the Solidity contract using Slither findings as ground-truth signals.
 Return ONLY JSON: {"summary":"string","findings":[{"title":"string","severity":"Critical|High|Medium|Low|Info","slither_check":"exact Slither check id or null","what_happens":"string","why_it_matters":"string","what_to_do":"string","mermaid_diagram":"graph TD; A-->B"}],"consolidated_patch":"one complete Solidity contract or null","patch_change_summary":"string"}
-For each finding, set slither_check to an exact check id from the supplied Slither signals, or null when no detector directly supports it. Never invent a detector id. The server attaches authoritative impact, confidence, and source lines; do not invent them. Any finding without a matching Slither check is explicitly ungrounded. For mermaid_diagram, output ONLY a simple Mermaid flowchart using this restricted syntax: flowchart TD followed by 3–5 lines of A["short label"] --> B["short label"]; use unique alphanumeric node IDs, double-quoted node labels, and only simple arrows. Do not use subgraphs, parentheses, HTML, markdown, styling, click directives, or extra prose. Keep labels short and avoid quotes inside labels. Diagram must illustrate the finding scenario (trigger → vulnerable behavior → consequence → mitigation), not a generic review flow. Always provide a non-empty diagram for every finding. Prefer a compact linear chain with one node per step and edges written on separate lines, e.g. flowchart TD\n A["Trigger"] --> B["Vulnerable behavior"]\n B --> C["Consequence"]\n C --> D["Mitigation"]. Use plain ASCII labels where possible, and do not add leading/trailing prose or fences. The frontend fallback is a last resort for genuinely missing or unparsable output, not a normal response. Produce ONE integrated full-contract patch addressing the findings together. Never put code patches inside individual findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. Do not claim the contract is safe.
+For each finding, set slither_check to an exact check id from the supplied Slither signals, or null when no detector directly supports it. Never invent a detector id. The server attaches authoritative impact, confidence, and source lines; do not invent them. Any finding without a matching Slither check is explicitly ungrounded. For mermaid_diagram, output ONLY a simple Mermaid flowchart using this restricted syntax: flowchart TD followed by 3–5 lines of A["short label"] --> B["short label"]; use unique alphanumeric node IDs, double-quoted node labels, and only simple arrows. Do not use subgraphs, parentheses, HTML, markdown, styling, click directives, or extra prose. Keep labels short and avoid quotes inside labels. Diagram must illustrate the finding scenario (trigger → vulnerable behavior → consequence → mitigation), not a generic review flow. Always provide a non-empty diagram for every finding. Prefer a compact linear chain with one node per step and edges written on separate lines, e.g. flowchart TD\n A["Trigger"] --> B["Vulnerable behavior"]\n B --> C["Consequence"]\n C --> D["Mitigation"]. Use plain ASCII labels where possible, and do not add leading/trailing prose or fences. The frontend fallback is a last resort for genuinely missing or unparsable output, not a normal response. Produce ONE integrated full-contract patch addressing the findings together. Never put code patches inside individual findings. Preserve every original public/external function, receive, and fallback. Do not remove functionality to silence detectors. Do not claim the contract is safe. If the Slither signals section says STATIC ANALYSIS UNAVAILABLE, you must not write that Slither found nothing or that the contract is clean; state that static analysis failed and findings are model-only.
 """
 
 USER_TEMPLATE = "Solidity source:\n```solidity\n{code}\n```\n\nSlither signals:\n{slither}\n\nReturn JSON only."
@@ -650,6 +676,8 @@ async def serve_frontend():
 @app.get("/health")
 async def health():
     available = is_slither_available()
+    compilers = _solc_status()
+    f1_ready = bool(available and ENABLE_SLITHER and compilers.get("compilers_ready"))
     _prune_analysis_store()
     wonder_configured = bool(RETRY_API_KEY and RETRY_MODEL_NAME)
     redis_available = False
@@ -663,7 +691,16 @@ async def health():
         "model": MODEL_NAME,
         "base_url": BASE_URL,
         "slither_available": available,
+        "slither_binary_ok": available,
         "slither_enabled": ENABLE_SLITHER,
+        "solc_versions": compilers.get("versions") or [],
+        "solc_version_count": compilers.get("version_count") or 0,
+        "solc_default_version": compilers.get("default_version"),
+        "solc_default_binary_found": bool(compilers.get("default_binary_found")),
+        "solc_default_binary_path": compilers.get("default_binary_path"),
+        "solc_search_roots": compilers.get("search_roots") or [],
+        "compilers_ready": bool(compilers.get("compilers_ready")),
+        "f1_ready": f1_ready,
         "analysis_store_size": len(analysis_store) if not REDIS_URL else None,
         "shared_storage_configured": bool(REDIS_URL),
         "shared_storage_available": redis_available,
@@ -706,7 +743,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
             )
     else:
         slither_error = "Slither disabled"
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": USER_TEMPLATE.format(code=code, slither=format_slither_for_prompt(slither_findings))}]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": USER_TEMPLATE.format(code=code, slither=format_slither_for_prompt(slither_findings, slither_error=slither_error))}]
     for attempt in range(2):
         try:
             kwargs = {"model": MODEL_NAME, "messages": messages, "temperature": 0.2 if attempt == 0 else 0.0, "max_tokens": MAX_OUTPUT_TOKENS, "timeout": REQUEST_TIMEOUT_SECONDS}
@@ -749,6 +786,8 @@ def analyze_contract(request: Request, payload: AuditRequest):
                 "slither_available": is_slither_available(), "slither_enabled": ENABLE_SLITHER,
                 "slither_findings_count": len(slither_findings), "slither_error": slither_error,
                 "f1_ran": slither_error is None,
+                "compilers_ready": bool(_solc_status().get("compilers_ready")),
+                "f1_ready": bool(is_slither_available() and ENABLE_SLITHER and _solc_status().get("compilers_ready")),
                 "pipeline_label": "F1 Slither → F2 Muse → F3 verify" if slither_error is None else MODEL_ONLY_PIPELINE,
                 "patches_verified_count": int(consolidated.patch_verified),
                 "patches_proposed_count": int(bool(consolidated.code)),
