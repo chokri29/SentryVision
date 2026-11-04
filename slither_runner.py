@@ -77,7 +77,7 @@ def _installed_solc_versions() -> List[str]:
 
 def _extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
     """Select from the runner's verified installed-binary inventory."""
-    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
+    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
     if require_pragma and not match:
         return None
     try:
