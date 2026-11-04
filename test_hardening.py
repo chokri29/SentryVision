@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 import main
 import slither_runner
+import solc_util
 
 
 def test_solc_range_selects_highest_installed_compatible_version(monkeypatch):
@@ -206,3 +207,52 @@ def test_missing_retry_state_has_clear_expired_message(monkeypatch):
     assert response.status_code == 404
     assert "expired" in response.json()["detail"].lower()
     assert "run the analysis again" in response.json()["detail"].lower()
+
+
+def test_solc_select_inventory_is_not_trusted_without_binary(monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr(solc_util, "_solc_roots", lambda: [])
+    monkeypatch.setattr(solc_util, "solc_select_installed_versions", lambda: ["0.8.0", "0.8.38"])
+    monkeypatch.setattr(solc_util, "path_solc_info", lambda: (None, None))
+    monkeypatch.setattr(
+        solc_util, "solc_artifact_path",
+        lambda version: Path("/verified/solc") if version == "0.8.38" else None,
+    )
+    assert solc_util.installed_solc_versions() == ["0.8.38"]
+
+
+def test_solc_util_uses_highest_installed_for_caret_and_no_pragma(monkeypatch):
+    monkeypatch.setattr(solc_util, "installed_solc_versions", lambda: ["0.8.20", "0.8.38"])
+    assert solc_util.extract_solc_version("pragma solidity ^0.8.0; contract Vault {}") == "0.8.38"
+    assert solc_util.extract_solc_version("contract LegacyLottery {}") == "0.8.38"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "pragma solidity ^0.8.0; contract Vault {}",
+        "contract LegacyLottery {}",
+    ],
+)
+def test_f1_pins_source_to_verified_compiler_before_python_api(monkeypatch, source):
+    captured = {}
+    monkeypatch.setattr(slither_runner, "_installed_solc_versions", lambda: ["0.8.38"])
+    monkeypatch.setattr(slither_runner, "_resolve_solc_binary", lambda version: (version, "/verified/solc-0.8.38"))
+    monkeypatch.setattr(slither_runner, "is_slither_available", lambda: True)
+
+    def fake_api(sol_file, solc_bin):
+        captured["source"] = sol_file.read_text(encoding="utf-8")
+        captured["binary"] = solc_bin
+        return {
+            "success": True, "detectors": [{"check": "reentrancy-eth"}],
+            "filtered_detectors": [{"check": "reentrancy-eth"}],
+            "detector_checks": ["reentrancy-eth"], "count": 1, "filtered_count": 1,
+            "raw": {"via": "python_api"}, "error": None, "error_kind": None,
+        }
+
+    monkeypatch.setattr(slither_runner, "_run_slither_python_api", fake_api)
+    result = slither_runner.run_slither(source, "Vault.sol")
+    assert result["success"] is True
+    assert result["detector_checks"] == ["reentrancy-eth"]
+    assert captured["binary"] == "/verified/solc-0.8.38"
+    assert captured["source"].startswith("pragma solidity 0.8.38;")
