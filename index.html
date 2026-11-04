@@ -164,18 +164,22 @@ function loadSample(k){inputEl.value=(SAMPLES[k]||"").replace(/\\n/g,"\n");docum
 document.querySelectorAll(".sample").forEach(b=>b.addEventListener("click",()=>loadSample(b.dataset.k)));
 function patchLabel(status,verified,fk){if(status==="verified"||verified)return"Passed Slither re-scan + surface check";if(fk==="surface_removed")return"Patch removed/changed public signatures";if(fk==="gutted_function")return"Patch gutted a public function";if(fk==="compile_failed")return"Patch failed to compile";if(fk==="still_vulnerable")return"Still vulnerable";if(fk==="regression_introduced")return"Regression introduced";if(fk==="verification_skipped")return"Model only — not verified";if(fk==="model_no_patch")return"No patch produced";if(status==="failed")return"Patch failed Slither re-check";return"Not verified";}
 function patchClass(status,verified){if(status==="verified"||verified)return"ok";if(status==="failed")return"fail";return"neutral";}
-function sanitizeMermaid(s){if(!s)return"";return String(s).replace(/^```mermaid\s*/i,"").replace(/```$/i,"").trim();}
-function fallbackDiagram(f){const t=String((f&&f.title)||"Issue").replace(/[^a-zA-Z0-9 _-]/g," ").slice(0,36);return"flowchart TD\n  A[Issue] --> B["+t+"]\n  B --> C[Review finding text]";}
+function sanitizeMermaid(s){if(!s)return"";return String(s).replace(/^\\s*```(?:mermaid)?\\s*/i,"").replace(/\\s*```\\s*$/i,"").trim();}
+function diagramLabel(value,fallback){const text=String(value||fallback||"").replace(/[`\\[\\]{}<>|;#&"]/g," ").replace(/[\\r\\n]+/g," ").replace(/\\s+/g," ").trim();return (text||fallback||"Review finding").slice(0,54);}
+function fallbackDiagram(f){const title=diagramLabel(f&&f.title,"Security finding");const trigger=diagramLabel(f&&f.what_happens,"Unexpected contract behavior");const impact=diagramLabel(f&&f.why_it_matters,"Potential user or protocol impact");const fix=diagramLabel(f&&f.what_to_do,"Apply the recommended mitigation");return `flowchart TD\\n  A["Finding: ${title}"] --> B["Trigger: ${trigger}"]\\n  B --> C["Impact: ${impact}"]\\n  C --> D["Mitigation: ${fix}"]`;}
 async function renderMermaid(host,source,finding){
   try{
+    if(!source)throw new Error("empty Mermaid source");
     if(typeof mermaid.parse==="function")await mermaid.parse(source);
     const id="m"+Math.random().toString(36).slice(2);
     const r=await mermaid.render(id,source);
-    if(!r||!r.svg||/Syntax error/i.test(r.svg))throw new Error("bad");
+    if(!r||!r.svg||/Syntax error/i.test(r.svg))throw new Error("Mermaid returned invalid SVG");
     const p=new DOMParser().parseFromString(r.svg,"image/svg+xml");
+    if(p.querySelector("parsererror"))throw new Error("Mermaid SVG could not be parsed");
     host.replaceChildren(document.importNode(p.documentElement,true));
   }catch(e){
-    try{const n=document.createElement("p");n.className="fb";n.textContent="Generated diagram was invalid. Showing a safe summary flow.";host.appendChild(n);const fb=fallbackDiagram(finding);if(typeof mermaid.parse==="function")await mermaid.parse(fb);const id="m"+Math.random().toString(36).slice(2);const r=await mermaid.render(id,fb);host.innerHTML+=r.svg;}catch(e2){host.textContent="Diagram unavailable. Review the finding description above.";}
+    console.warn("SentryVision Mermaid diagram rejected; rendering finding-specific fallback.",e);
+    try{const n=document.createElement("p");n.className="fb";n.textContent="The generated diagram could not be rendered. Showing a finding-specific summary flow.";host.replaceChildren(n);const fb=fallbackDiagram(finding);if(typeof mermaid.parse==="function")await mermaid.parse(fb);const id="m"+Math.random().toString(36).slice(2);const r=await mermaid.render(id,fb);const p=new DOMParser().parseFromString(r.svg,"image/svg+xml");if(p.querySelector("parsererror"))throw new Error("Fallback SVG parse failed");host.appendChild(document.importNode(p.documentElement,true));}catch(e2){console.warn("SentryVision fallback diagram failed.",e2);host.textContent="Diagram unavailable. Review the finding description above.";}
   }
 }
 function card(f,i){
