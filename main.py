@@ -52,7 +52,7 @@ try:
 except Exception:
     def _solc_status():
         return {
-            "default_version": os.getenv("SOLC_VERSION", "0.8.20"),
+            "default_version": os.getenv("SOLC_VERSION", "0.8.38"),
             "versions": [],
             "version_count": 0,
             "default_binary_found": False,
