@@ -17,12 +17,21 @@ from semantic_version import NpmSpec, Version
 
 logger = logging.getLogger("sentryvision.slither")
 
-DEFAULT_SOLC = os.getenv("SOLC_VERSION", "0.8.20")
 _SOLC_LOCK = threading.Lock()
 _PREFERRED_SOLC = (
-    "0.8.26", "0.8.24", "0.8.20", "0.8.19", "0.8.17", "0.8.16",
-    "0.8.13", "0.8.10", "0.8.7", "0.8.4", "0.8.0",
+    "0.8.38", "0.8.30", "0.8.28", "0.8.26", "0.8.24", "0.8.20",
+    "0.8.19", "0.8.17", "0.8.16", "0.8.13", "0.8.10", "0.8.7", "0.8.4", "0.8.0",
 )
+
+
+def _env_default_solc() -> str:
+    """Pick a default solc that actually exists when possible."""
+    requested = (os.getenv("SOLC_VERSION") or "").strip()
+    # Prefer explicit env only as a hint — still validated later
+    return requested or "0.8.20"
+
+
+DEFAULT_SOLC = _env_default_solc()
 
 _PATH_SOLC_CACHE: Optional[Tuple[Optional[str], Optional[Path]]] = None
 
@@ -217,7 +226,14 @@ def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> O
         logger.warning("Unsupported Solidity pragma constraint: %s", spec)
         return None
 
-    matches = [v for v in installed_solc_versions() if constraint.match(Version(v))]
+    available = installed_solc_versions()
+    # Merge solc-select reported versions even if binary path not resolved yet
+    try:
+        available = sorted(set(available) | set(solc_select_installed_versions()), key=Version)
+    except Exception:
+        pass
+
+    matches = [v for v in available if constraint.match(Version(v))]
     if matches:
         return sorted(matches, key=Version)[-1]
 
@@ -229,28 +245,42 @@ def extract_solc_version(source_code: str, *, require_pragma: bool = False) -> O
         except ValueError:
             pass
 
+    # Exact version requested — try install / solc-select use
     if re.fullmatch(r"\d+\.\d+\.\d+", spec):
-        return spec if install_solc(spec) else None
+        if install_solc(spec):
+            return spec
+        # Never return a version that is not installed
+        if available:
+            try:
+                # closest higher matching major.minor if any
+                same_minor = [v for v in available if v.startswith(spec.rsplit(".", 1)[0])]
+                if same_minor:
+                    return sorted(same_minor, key=Version)[-1]
+                return sorted(available, key=Version)[-1]
+            except Exception:
+                return available[-1]
+        return None
 
     for candidate in _PREFERRED_SOLC:
         try:
-            if constraint.match(Version(candidate)) and install_solc(candidate):
+            if not constraint.match(Version(candidate)):
+                continue
+            if candidate in available or install_solc(candidate):
                 return candidate
         except Exception:
             continue
 
-    try:
-        if constraint.match(Version(DEFAULT_SOLC)) and install_solc(DEFAULT_SOLC):
-            return DEFAULT_SOLC
-    except Exception:
-        pass
+    # Any available version that satisfies the pragma
+    if matches:
+        return sorted(matches, key=Version)[-1]
+
+    # Last resort: highest installed compiler (better than demanding missing 0.8.0)
+    if available:
+        logger.warning("No exact pragma match; using highest installed solc %s", available[-1])
+        return available[-1]
 
     if path_bin and path_ver:
-        try:
-            if constraint.match(Version(path_ver)):
-                return path_ver
-        except ValueError:
-            pass
+        return path_ver
 
     return None
 
