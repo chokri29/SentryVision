@@ -74,6 +74,7 @@ def test_resolve_solc_uses_artifact_without_solc_select_use(tmp_path, monkeypatc
     artifact.mkdir(parents=True)
     binary = artifact / f"solc-{version}"
     binary.write_text("fake-solc")
+    binary.chmod(0o755)
     monkeypatch.setenv("SOLC_SELECT_INSTALL_DIR", str(tmp_path))
 
     def fail_run(*_args, **_kwargs):
