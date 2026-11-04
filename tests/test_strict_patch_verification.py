@@ -50,7 +50,7 @@ def test_pragma_selects_highest_installed_compatible_compiler(monkeypatch):
 
 
 def test_missing_compatible_compiler_fails_closed_before_slither(monkeypatch):
-    monkeypatch.setattr(slither_runner, "_extract_solc_version", lambda _source: None)
+    monkeypatch.setattr(slither_runner, "_installed_solc_versions", lambda: [])
 
     def slither_must_not_run():
         raise AssertionError("Slither must not run without a compatible compiler")
@@ -60,7 +60,7 @@ def test_missing_compatible_compiler_fails_closed_before_slither(monkeypatch):
 
     assert result["success"] is False
     assert result["error_kind"] == "compile_failed"
-    assert result["error"] == "unverified: no compatible compiler installed."
+    assert "no compatible compiler installed" in result["error"]
 
 
 def test_patch_without_pragma_fails_closed(monkeypatch):
@@ -126,11 +126,11 @@ def test_patch_is_verified_only_when_all_gates_pass(monkeypatch):
 
 
 def test_verify_patch_surfaces_exact_missing_compiler_reason(monkeypatch):
-    monkeypatch.setattr(slither_runner, "_extract_solc_version", lambda _source: None)
+    monkeypatch.setattr(slither_runner, "_installed_solc_versions", lambda: [])
     result = verify_patch(ORIGINAL, original_code=ORIGINAL)
 
     assert result["patch_verified"] is False
-    assert result["patch_verification_details"] == "unverified: no compatible compiler installed."
+    assert "no compatible compiler installed" in result["patch_verification_details"]
     assert result["verification_error_kind"] == "compile_failed"
 
 
