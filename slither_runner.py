@@ -303,6 +303,169 @@ def filter_findings(detectors: list) -> list:
         filtered.append(d)
     return filtered
 
+
+def _impact_label(impact) -> str:
+    try:
+        name = getattr(impact, "name", None) or str(impact)
+    except Exception:
+        name = str(impact)
+    name = str(name).upper()
+    mapping = {
+        "HIGH": "High",
+        "MEDIUM": "Medium",
+        "LOW": "Low",
+        "INFORMATIONAL": "Informational",
+        "OPTIMIZATION": "Optimization",
+        "CRITICAL": "High",
+    }
+    return mapping.get(name, name.title() if name else "Informational")
+
+
+def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Run Slither via Python API — bypasses CLI argparse entirely."""
+    try:
+        from slither.slither import Slither
+    except Exception as exc:
+        logger.warning("Slither Python API import failed: %s", exc)
+        return None
+
+    kwargs: Dict[str, Any] = {}
+    if solc_bin:
+        kwargs["solc"] = str(solc_bin)
+    # Quieter compile on shared hosts
+    for key, val in (
+        ("disable_solc_warnings", True),
+        ("solc_disable_warnings", True),
+    ):
+        kwargs.setdefault(key, val)
+
+    env_backup = os.environ.copy()
+    try:
+        if solc_bin:
+            parent = str(Path(solc_bin).parent)
+            os.environ["PATH"] = parent + os.pathsep + os.environ.get("PATH", "")
+            os.environ["SOLC_BINARY"] = str(solc_bin)
+            os.environ["SOLC"] = str(solc_bin)
+
+        try:
+            sl = Slither(str(sol_file), **kwargs)
+        except TypeError:
+            # Older Slither: fewer kwargs
+            slim = {"solc": str(solc_bin)} if solc_bin else {}
+            try:
+                sl = Slither(str(sol_file), **slim)
+            except Exception as exc:
+                logger.warning("Slither() failed: %s", exc)
+                return {
+                    "success": False,
+                    "detectors": [],
+                    "filtered_detectors": [],
+                    "detector_checks": [],
+                    "count": 0,
+                    "filtered_count": 0,
+                    "raw": None,
+                    "error": f"Slither API init failed: {exc}",
+                    "error_kind": _classify_slither_error(str(exc)),
+                }
+        except Exception as exc:
+            logger.warning("Slither() failed: %s", exc)
+            return {
+                "success": False,
+                "detectors": [],
+                "filtered_detectors": [],
+                "detector_checks": [],
+                "count": 0,
+                "filtered_count": 0,
+                "raw": None,
+                "error": f"Slither API init failed: {exc}",
+                "error_kind": _classify_slither_error(str(exc)),
+            }
+
+        # Register stock detectors if not already present
+        try:
+            from slither.detectors import all_detectors
+            detector_list = list(all_detectors)
+        except Exception:
+            try:
+                from slither.detectors.detector import all_detectors as ad2
+                detector_list = list(ad2)
+            except Exception:
+                detector_list = []
+
+        for det_cls in detector_list:
+            try:
+                sl.register_detector(det_cls)
+            except Exception:
+                continue
+
+        try:
+            raw_results = sl.run_detectors()
+        except Exception as exc:
+            logger.warning("run_detectors failed: %s", exc)
+            return {
+                "success": False,
+                "detectors": [],
+                "filtered_detectors": [],
+                "detector_checks": [],
+                "count": 0,
+                "filtered_count": 0,
+                "raw": None,
+                "error": f"Slither run_detectors failed: {exc}",
+                "error_kind": _classify_slither_error(str(exc)),
+            }
+
+        detectors: List[Dict[str, Any]] = []
+        for group in raw_results or []:
+            if not group:
+                continue
+            items = group if isinstance(group, list) else [group]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                check = item.get("check") or item.get("name") or "unknown"
+                impact = item.get("impact") or "Informational"
+                if not isinstance(impact, str):
+                    impact = _impact_label(impact)
+                confidence = item.get("confidence") or "Medium"
+                if not isinstance(confidence, str):
+                    confidence = _impact_label(confidence)
+                lines: set = set()
+                elements: set = set()
+                for element in item.get("elements") or []:
+                    if not isinstance(element, dict):
+                        continue
+                    mapping = element.get("source_mapping") or {}
+                    for line in mapping.get("lines") or []:
+                        if isinstance(line, int) and line > 0:
+                            lines.add(line)
+                    if element.get("name"):
+                        elements.add(str(element["name"]))
+                detectors.append({
+                    "check": check,
+                    "impact": impact,
+                    "confidence": confidence,
+                    "description": (item.get("description") or "").strip(),
+                    "lines": sorted(lines),
+                    "elements": sorted(elements),
+                })
+
+        filtered = filter_findings(detectors)
+        return {
+            "success": True,
+            "detectors": detectors,
+            "filtered_detectors": filtered,
+            "detector_checks": sorted({d["check"] for d in detectors if d.get("check")}),
+            "count": len(detectors),
+            "filtered_count": len(filtered),
+            "raw": {"success": True, "results": {"detectors": detectors}, "via": "python_api"},
+            "error": None,
+            "error_kind": None,
+        }
+    finally:
+        os.environ.clear()
+        os.environ.update(env_backup)
+
+
 def run_slither(source_code: str, contract_name: str = "Contract.sol", *, require_pragma: bool = False) -> Optional[Dict[str, Any]]:
     if not source_code or not source_code.strip():
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "Empty source", "error_kind": "compile_failed"}
@@ -345,6 +508,14 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         out_file = tmp_path / "slither.json"
         sol_file.write_text(source, encoding="utf-8")
         logger.info("F1 Slither using solc %s at %s", solc_ver, solc_bin)
+
+        # Prefer Python API — avoids CLI argparse.ArgumentTypeError on Render
+        api_result = _run_slither_python_api(sol_file, solc_bin)
+        if api_result is not None and api_result.get("success"):
+            return api_result
+        if api_result is not None and api_result.get("error"):
+            logger.warning("Python API path failed: %s — falling back to CLI", api_result.get("error"))
+
         try:
             proc, run_err = _run_slither_process(sol_file, out_file, solc_bin, tmp_path)
         except subprocess.TimeoutExpired:
@@ -358,6 +529,9 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
                 or ((proc.stderr if proc else "") or (proc.stdout if proc else "") or "")
                 or "Slither produced no JSON output"
             )
+            # Prefer API error if CLI hit argparse again
+            if api_result and api_result.get("error") and "ArgumentTypeError" in (err or ""):
+                err = api_result["error"]
             return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": err, "error_kind": _classify_slither_error(err)}
         try:
             raw = json.loads(out_file.read_text(encoding="utf-8"))
