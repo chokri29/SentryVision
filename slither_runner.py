@@ -347,15 +347,53 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
             os.environ["SOLC_BINARY"] = str(solc_bin)
             os.environ["SOLC"] = str(solc_bin)
 
-        try:
-            sl = Slither(str(sol_file), **kwargs)
-        except TypeError:
-            # Older Slither: fewer kwargs
-            slim = {"solc": str(solc_bin)} if solc_bin else {}
+        def _init_slither(path: Path, kw: dict):
             try:
-                sl = Slither(str(sol_file), **slim)
-            except Exception as exc:
-                logger.warning("Slither() failed: %s", exc)
+                return Slither(str(path), **kw), None
+            except TypeError:
+                slim = {"solc": kw["solc"]} if kw.get("solc") else {}
+                try:
+                    return Slither(str(path), **slim), None
+                except Exception as exc2:
+                    return None, exc2
+            except Exception as exc2:
+                return None, exc2
+
+        sl, init_err = _init_slither(sol_file, kwargs)
+        if sl is None and init_err is not None:
+            err_text = str(init_err)
+            logger.warning("Slither() failed: %s", err_text)
+            # e.g. "solc 0.8.0 not installed, only 0.8.38 available"
+            m = re.search(r"only\s+([0-9]+\.[0-9]+\.[0-9]+)\s+available", err_text, re.I)
+            if m:
+                alt = m.group(1)
+                logger.info("Retrying Slither with host solc %s", alt)
+                try:
+                    subprocess.run(["solc-select", "use", alt], capture_output=True, text=True, timeout=60, check=False)
+                except Exception:
+                    pass
+                # Rewrite pragma to exact available version so compile matches
+                try:
+                    fixed = re.sub(
+                        r"pragma\s+solidity\s+[^;]+;",
+                        f"pragma solidity {alt};",
+                        sol_file.read_text(encoding="utf-8"),
+                        count=1,
+                    )
+                    sol_file.write_text(fixed, encoding="utf-8")
+                except Exception:
+                    pass
+                alt_bin = None
+                try:
+                    from solc_util import resolve_solc_binary as _rs
+                    _, alt_bin = _rs(alt)
+                except Exception:
+                    alt_bin = solc_bin
+                alt_kw = dict(kwargs)
+                if alt_bin:
+                    alt_kw["solc"] = str(alt_bin)
+                sl, init_err = _init_slither(sol_file, alt_kw)
+            if sl is None:
                 return {
                     "success": False,
                     "detectors": [],
@@ -364,22 +402,9 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
                     "count": 0,
                     "filtered_count": 0,
                     "raw": None,
-                    "error": f"Slither API init failed: {exc}",
-                    "error_kind": _classify_slither_error(str(exc)),
+                    "error": f"Slither API init failed: {init_err}",
+                    "error_kind": _classify_slither_error(str(init_err)),
                 }
-        except Exception as exc:
-            logger.warning("Slither() failed: %s", exc)
-            return {
-                "success": False,
-                "detectors": [],
-                "filtered_detectors": [],
-                "detector_checks": [],
-                "count": 0,
-                "filtered_count": 0,
-                "raw": None,
-                "error": f"Slither API init failed: {exc}",
-                "error_kind": _classify_slither_error(str(exc)),
-            }
 
         # Register stock detectors if not already present
         try:
@@ -479,6 +504,25 @@ def run_slither(source_code: str, contract_name: str = "Contract.sol", *, requir
         return {"success": False, "detectors": [], "filtered_detectors": [], "detector_checks": [], "count": 0, "filtered_count": 0, "raw": None, "error": "unverified: patch has no Solidity pragma.", "error_kind": "compile_failed"}
     rewritten = rewrite_known_oz_imports(source_code)
     selected_version = _extract_solc_version(source_code)
+    # If Slither host only has a newer 0.8.x (e.g. 0.8.38), prefer it over a stale 0.8.0 pin
+    try:
+        from solc_util import solc_select_installed_versions, installed_solc_versions as _iv
+        available = sorted(set(_iv()) | set(solc_select_installed_versions()), key=Version)
+        if selected_version and available:
+            pragma_m = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+            spec = pragma_m.group(1).strip() if pragma_m else f"^{selected_version}"
+            try:
+                constraint = NpmSpec(spec)
+                matching = [v for v in available if constraint.match(Version(v))]
+                if matching:
+                    best = sorted(matching, key=Version)[-1]
+                    if best != selected_version:
+                        logger.info("Upgrading selected solc %s → %s (available on host)", selected_version, best)
+                        selected_version = best
+            except ValueError:
+                pass
+    except Exception as exc:
+        logger.warning("solc version upgrade probe failed: %s", exc)
     if not selected_version:
         path_ver, path_bin = _util_path_solc_info()
         detail = (
