@@ -76,26 +76,26 @@ def _installed_solc_versions() -> List[str]:
 
 
 def _extract_solc_version(source_code: str, *, require_pragma: bool = False) -> Optional[str]:
-    # Prefer shared util (PATH solc + solc-select artifacts)
-    try:
-        ver = _util_extract_solc_version(source_code, require_pragma=require_pragma)
-        if ver:
-            return ver
-    except Exception as exc:
-        logger.warning("util extract_solc_version failed: %s", exc)
-    # Last resort: any PATH solc that satisfies the pragma
-    match = re.search(r"pragma\s+solidity\s+([^;]+);", source_code)
+    """Select from the runner's verified installed-binary inventory."""
+    match = re.search(r"pragma\\s+solidity\\s+([^;]+);", source_code)
     if require_pragma and not match:
         return None
-    spec = match.group(1).strip() if match else DEFAULT_SOLC
-    path_ver, path_bin = _util_path_solc_info()
-    if path_bin and path_ver:
+    try:
+        available = sorted(set(_installed_solc_versions()), key=Version)
+    except Exception as exc:
+        logger.warning("Could not enumerate installed solc binaries: %s", exc)
+        return None
+    if not available:
+        return None
+    if match:
         try:
-            if NpmSpec(spec).match(Version(path_ver)):
-                return path_ver
+            constraint = NpmSpec(match.group(1).strip())
+            compatible = [version for version in available if constraint.match(Version(version))]
+            if compatible:
+                return compatible[-1]
         except ValueError:
-            pass
-    return None
+            logger.warning("Unsupported Solidity pragma: %s", match.group(1))
+    return available[-1]
 
 
 _SOLC_LOCK = threading.Lock()
@@ -220,31 +220,21 @@ def _install_solc(version: str) -> Optional[Path]:
 
 def _resolve_solc_binary(version: Optional[str]):
     if not version:
-        # Fall back to whatever is on PATH
         path_ver, path_bin = _util_path_solc_info()
-        if path_bin:
-            return path_ver or DEFAULT_SOLC, str(path_bin)
+        if path_bin and path_ver:
+            return path_ver, str(path_bin)
         return None, None
     try:
-        ver, path = _util_resolve_solc_binary(version)
-        if path:
-            return ver, path
+        resolved_version, resolved_path = _util_resolve_solc_binary(version)
+        if resolved_path and resolved_version == version:
+            return version, resolved_path
     except Exception as exc:
         logger.warning("util resolve_solc_binary failed: %s", exc)
+    # Installation is allowed only as an explicit attempt to obtain the exact
+    # requested version. Never relabel a different PATH compiler as this version.
     path = _solc_artifact_path(version) or _install_solc(version)
     if path:
         return version, str(path)
-    # PATH solc as last resort when version is compatible
-    path_ver, path_bin = _util_path_solc_info()
-    if path_bin and path_ver == version:
-        return version, str(path_bin)
-    if path_bin and path_ver:
-        try:
-            if Version(path_ver).major == Version(version).major:
-                logger.info("Using PATH solc %s for requested %s", path_ver, version)
-                return path_ver, str(path_bin)
-        except Exception:
-            pass
     return version, None
 
 
