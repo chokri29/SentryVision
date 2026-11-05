@@ -288,3 +288,98 @@ def test_python_api_retries_compiler_mismatch_once(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert calls[1][0].startswith("pragma solidity 0.8.38;")
     assert calls[1][1] == "/verified/solc-0.8.38"
+
+
+def test_builtin_detector_loader_enumerates_classes_from_slither_module():
+    class AbstractDetector:
+        pass
+
+    class ReentrancyEth(AbstractDetector):
+        ARGUMENT = "reentrancy-eth"
+
+    class Unrelated:
+        pass
+
+    module = SimpleNamespace(
+        AbstractDetector=AbstractDetector,
+        ReentrancyEth=ReentrancyEth,
+        Unrelated=Unrelated,
+    )
+    assert slither_runner._builtin_detector_classes(module, AbstractDetector) == [ReentrancyEth]
+
+
+def test_python_api_registers_builtin_detectors_before_running(monkeypatch, tmp_path):
+    import slither.slither
+    registered = []
+
+    class FakeDetector:
+        ARGUMENT = "reentrancy-eth"
+
+    class FakeSlither:
+        def __init__(self, _source_path, **_kwargs):
+            pass
+
+        def register_detector(self, detector_class):
+            registered.append(detector_class)
+
+        def run_detectors(self):
+            return [[{
+                "check": "reentrancy-eth",
+                "impact": "High",
+                "confidence": "High",
+                "description": "External call before state update",
+                "elements": [],
+            }]]
+
+    source = tmp_path / "Vault.sol"
+    source.write_text("pragma solidity 0.8.38; contract Vault {}", encoding="utf-8")
+    monkeypatch.setattr(slither.slither, "Slither", FakeSlither)
+    monkeypatch.setattr(slither_runner, "_builtin_detector_classes", lambda: [FakeDetector])
+
+    result = slither_runner._run_slither_python_api(source, None)
+
+    assert registered == [FakeDetector]
+    assert result["success"] is True
+    assert result["detector_registry_count"] == 1
+    assert result["count"] == 1
+    assert result["filtered_count"] == 1
+    assert result["detector_checks"] == ["reentrancy-eth"]
+
+
+def test_python_api_fails_closed_when_no_builtin_detectors_register(monkeypatch, tmp_path):
+    import slither.slither
+
+    class FakeSlither:
+        def __init__(self, _source_path, **_kwargs):
+            pass
+
+        def run_detectors(self):
+            return []
+
+    source = tmp_path / "Vault.sol"
+    source.write_text("pragma solidity 0.8.38; contract Vault {}", encoding="utf-8")
+    monkeypatch.setattr(slither.slither, "Slither", FakeSlither)
+    monkeypatch.setattr(slither_runner, "_builtin_detector_classes", lambda: [])
+
+    result = slither_runner._run_slither_python_api(source, None)
+
+    assert result["success"] is False
+    assert result["error_kind"] == "execution_error"
+    assert "loaded no built-in detectors" in result["error"]
+
+
+def test_empty_filtered_detector_set_does_not_fall_back_to_raw_hits():
+    result = {
+        "detectors": [{"check": "reentrancy-eth", "impact": "High"}],
+        "filtered_detectors": [],
+    }
+    assert main._f1_findings_for_prompt(result) == []
+
+
+def test_filtered_detector_set_is_used_for_f1_grounding():
+    filtered = [{"check": "reentrancy-eth", "impact": "High"}]
+    result = {
+        "detectors": filtered + [{"check": "naming-convention", "impact": "Informational"}],
+        "filtered_detectors": filtered,
+    }
+    assert main._f1_findings_for_prompt(result) == filtered

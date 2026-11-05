@@ -7,6 +7,7 @@ Also used for F3 verified patches (re-scan proposed fixes).
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import os
 import re
@@ -311,6 +312,23 @@ def _impact_label(impact) -> str:
     return mapping.get(name, name.title() if name else "Informational")
 
 
+def _builtin_detector_classes(module=None, base_class=None) -> List[type]:
+    """Load built-in detector classes from Slither's all_detectors module.
+
+    In Slither, all_detectors is a Python module, not an iterable list.
+    """
+    if module is None:
+        from slither.detectors import all_detectors as module
+    if base_class is None:
+        from slither.detectors.abstract_detector import AbstractDetector as base_class
+    classes = {
+        candidate
+        for _, candidate in inspect.getmembers(module, inspect.isclass)
+        if candidate is not base_class and not inspect.isabstract(candidate) and issubclass(candidate, base_class)
+    }
+    return sorted(classes, key=lambda cls: getattr(cls, "ARGUMENT", cls.__name__))
+
+
 def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional[Dict[str, Any]]:
     """Run Slither via Python API — bypasses CLI argparse entirely."""
     try:
@@ -412,22 +430,39 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
                     "error_kind": _classify_slither_error(error_text) or "compile_failed",
                 }
 
-        # Register stock detectors if not already present
+        # Slither exposes all_detectors as a module; enumerate its detector
+        # classes instead of trying to iterate over the module itself.
         try:
-            from slither.detectors import all_detectors
-            detector_list = list(all_detectors)
-        except Exception:
-            try:
-                from slither.detectors.detector import all_detectors as ad2
-                detector_list = list(ad2)
-            except Exception:
-                detector_list = []
+            detector_list = _builtin_detector_classes()
+        except Exception as exc:
+            logger.exception("Could not load Slither built-in detector classes")
+            return {
+                "success": False, "detectors": [], "filtered_detectors": [],
+                "detector_checks": [], "count": 0, "filtered_count": 0,
+                "detector_registry_count": 0, "detector_registry_checks": [],
+                "raw": None, "error": f"Slither detector registry unavailable: {exc}",
+                "error_kind": "execution_error",
+            }
 
+        registered = []
         for det_cls in detector_list:
             try:
                 sl.register_detector(det_cls)
-            except Exception:
-                continue
+                registered.append(det_cls)
+            except Exception as exc:
+                logger.warning("Could not register Slither detector %s: %s", getattr(det_cls, "ARGUMENT", det_cls.__name__), exc)
+        if not registered:
+            return {
+                "success": False, "detectors": [], "filtered_detectors": [],
+                "detector_checks": [], "count": 0, "filtered_count": 0,
+                "detector_registry_count": 0, "detector_registry_checks": [],
+                "raw": None, "error": "Slither loaded no built-in detectors; F1 cannot claim a clean scan.",
+                "error_kind": "execution_error",
+            }
+        logger.info(
+            "F1 registered %d built-in Slither detectors: %s",
+            len(registered), [getattr(cls, "ARGUMENT", cls.__name__) for cls in registered],
+        )
 
         try:
             raw_results = sl.run_detectors()
@@ -481,6 +516,12 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
                 })
 
         filtered = filter_findings(detectors)
+        raw_checks = sorted({d["check"] for d in detectors if d.get("check")})
+        filtered_checks = sorted({d["check"] for d in filtered if d.get("check")})
+        logger.info(
+            "F1 detector results: registry=%d raw=%d filtered=%d raw_checks=%s filtered_checks=%s",
+            len(registered), len(detectors), len(filtered), raw_checks, filtered_checks,
+        )
         return {
             "success": True,
             "detectors": detectors,
@@ -488,6 +529,10 @@ def _run_slither_python_api(sol_file: Path, solc_bin: Optional[str]) -> Optional
             "detector_checks": sorted({d["check"] for d in detectors if d.get("check")}),
             "count": len(detectors),
             "filtered_count": len(filtered),
+            "detector_registry_count": len(registered),
+            "detector_registry_checks": [getattr(cls, "ARGUMENT", cls.__name__) for cls in registered],
+            "raw_checks": raw_checks,
+            "filtered_checks": filtered_checks,
             "raw": {"success": True, "results": {"detectors": detectors}, "via": "python_api"},
             "error": None,
             "error_kind": None,
