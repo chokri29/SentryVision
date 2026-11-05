@@ -324,7 +324,7 @@ def _builtin_detector_classes(module=None, base_class=None) -> List[type]:
     classes = {
         candidate
         for _, candidate in inspect.getmembers(module, inspect.isclass)
-        if candidate is not base_class and issubclass(candidate, base_class)
+        if candidate is not base_class and not inspect.isabstract(candidate) and issubclass(candidate, base_class)
     }
     return sorted(classes, key=lambda cls: getattr(cls, "ARGUMENT", cls.__name__))
 
