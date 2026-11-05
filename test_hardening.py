@@ -366,3 +366,20 @@ def test_python_api_fails_closed_when_no_builtin_detectors_register(monkeypatch,
     assert result["success"] is False
     assert result["error_kind"] == "execution_error"
     assert "loaded no built-in detectors" in result["error"]
+
+
+def test_empty_filtered_detector_set_does_not_fall_back_to_raw_hits():
+    result = {
+        "detectors": [{"check": "reentrancy-eth", "impact": "High"}],
+        "filtered_detectors": [],
+    }
+    assert main._f1_findings_for_prompt(result) == []
+
+
+def test_filtered_detector_set_is_used_for_f1_grounding():
+    filtered = [{"check": "reentrancy-eth", "impact": "High"}]
+    result = {
+        "detectors": filtered + [{"check": "naming-convention", "impact": "Informational"}],
+        "filtered_detectors": filtered,
+    }
+    assert main._f1_findings_for_prompt(result) == filtered
