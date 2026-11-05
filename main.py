@@ -715,6 +715,19 @@ async def health():
     }
 
 
+def _f1_findings_for_prompt(slither_result: dict) -> list:
+    """Use the explicitly filtered detector set when the runner provides it.
+
+    An empty filtered list is meaningful; never fall back to unfiltered raw
+    detections, because that bypasses the server's impact/check policy.
+    """
+    if "filtered_detectors" in slither_result:
+        filtered = slither_result.get("filtered_detectors")
+        return list(filtered) if isinstance(filtered, list) else []
+    raw = slither_result.get("detectors")
+    return list(raw) if isinstance(raw, list) else []
+
+
 @app.post("/analyze", response_model=AuditResponse)
 def analyze_contract(request: Request, payload: AuditRequest):
     enforce_rate_limit(get_client_ip(request))
@@ -743,7 +756,7 @@ def analyze_contract(request: Request, payload: AuditRequest):
             slither_raw_checks = list(slither_result.get("raw_checks") or slither_result.get("detector_checks") or [])
             slither_filtered_checks = list(slither_result.get("filtered_checks") or sorted({d.get("check") for d in (slither_result.get("filtered_detectors") or []) if d.get("check")}))
             logger.info("F1 report input: raw=%d filtered=%d registry=%d raw_checks=%s filtered_checks=%s", slither_raw_count, slither_filtered_count, slither_registry_count, slither_raw_checks, slither_filtered_checks)
-            slither_findings = slither_result.get("filtered_detectors") or slither_result.get("detectors") or []
+            slither_findings = _f1_findings_for_prompt(slither_result)
             original_high_medium_checks = sorted({d["check"] for d in (slither_result.get("detectors") or []) if d.get("impact") in {"Critical", "High", "Medium"} and d.get("check")})
             original_detector_checks = sorted(
                 {d["check"] for d in (slither_result.get("filtered_detectors") or []) if d.get("check")}
