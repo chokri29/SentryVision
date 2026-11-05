@@ -61,6 +61,11 @@ textarea{width:100%;min-height:200px;resize:vertical;background:#0c0a16;color:#d
 .finding p{margin:0 0 6px;font-size:.86rem;line-height:1.5;color:#e9e0ff}
 .ground{font-size:.75rem;color:var(--muted);margin-top:6px}
 .diagram{margin-top:10px;padding:10px;border-radius:12px;background:#0a0814;border:1px solid var(--border);overflow-x:auto}
+@media (min-width:768px){
+  .diagram{display:flex;justify-content:center;align-items:flex-start}
+  .diagram>div{width:100%;display:flex;justify-content:center}
+  .diagram svg{display:block;max-width:100%;height:auto;margin-inline:auto}
+}
 .fb{font-size:.75rem;color:#fbbf24;margin:0 0 8px}
 pre{background:#0a0814;border:1px solid var(--border);border-radius:12px;padding:12px;overflow:auto;font-size:.75rem;color:#c7f9e0;max-height:320px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
