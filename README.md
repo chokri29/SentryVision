@@ -1,6 +1,6 @@
 # Sentry Vision
 
-<img src="image.jpg" alt="Sentry Vision preview" width="100%">
+<img src="image2.jpg" alt="Sentry Vision preview" width="100%">
 
 <p align="center">
   <a href="https://sentry-vision-dyql.onrender.com/">
