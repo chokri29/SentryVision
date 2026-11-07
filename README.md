@@ -1,5 +1,7 @@
 # Sentry Vision
 
+https://github.com/chokri29/SentryVision/blob/main/LICENSE
+
 <img src="image.jpg" alt="Sentry Vision preview" width="100%">
 
 <p align="center">
@@ -11,6 +13,10 @@
 </a>
   <a href="https://github.com/chokri29/SentryVision/actions/workflows/tests.yml">
     <img src="https://img.shields.io/badge/CI-passing-28a745?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI workflow">
+  </a>
+
+   <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License">
   </a>
 </p>
 
