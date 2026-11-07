@@ -1,7 +1,5 @@
 # Sentry Vision
 
-https://github.com/chokri29/SentryVision/blob/main/LICENSE
-
 <img src="image.jpg" alt="Sentry Vision preview" width="100%">
 
 <p align="center">
